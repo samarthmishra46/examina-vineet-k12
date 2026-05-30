@@ -459,7 +459,7 @@ function WrongPanel({
     // Still waiting for diagnosis
     return (
       <div className="border-t border-line px-6 py-5">
-        <p className="text-sm text-inkMuted">Getting Aryan Sir's take…</p>
+        <p className="text-sm text-inkMuted">Getting Aryan Sir&apos;s take…</p>
       </div>
     );
   }
