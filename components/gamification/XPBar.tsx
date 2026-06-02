@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getLevelProgress } from '@/lib/xp';
 
 interface XPData {
   xp: number;

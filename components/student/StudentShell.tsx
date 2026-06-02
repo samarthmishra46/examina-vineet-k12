@@ -4,7 +4,7 @@ import { getCurrentUser } from '@/lib/auth/helpers';
 import { XPBar } from '@/components/gamification/XPBar';
 
 export async function StudentShell({ children }: { children: React.ReactNode }) {
-  const user = await getCurrentUser();
+  await getCurrentUser();
 
   async function handleSignOut() {
     'use server';
