@@ -127,12 +127,20 @@ export function LessonPlayer({
     });
   }, [state, sectionId]);
 
-  // Mark the section as completed when end_lesson fires.
+  // On lesson complete: mark progress, award XP, generate flashcards.
   useEffect(() => {
     if (state !== 'ended') return;
     markSectionCompleted(sectionId).catch((err) => {
       console.warn('[progress] markCompleted failed:', err);
     });
+    fetch('/api/xp/award', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'lesson_complete' }),
+    }).catch(() => undefined);
+    fetch(`/api/flashcards/generate?sectionId=${sectionId}`, {
+      method: 'POST',
+    }).catch(() => undefined);
   }, [state, sectionId]);
 
   async function enableAudio() {

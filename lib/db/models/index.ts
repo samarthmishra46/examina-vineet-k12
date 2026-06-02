@@ -4,4 +4,8 @@ export { Progress, type ProgressAttrs } from './progress';
 export { LessonSession, type LessonSessionAttrs } from './lesson-session';
 export { Question, type QuestionAttrs } from './question';
 export { PracticeAttempt, type PracticeAttemptAttrs } from './practice-attempt';
+export { GameProfile, type GameProfileAttrs } from './game-profile';
+export { StudentProfile, type StudentProfileAttrs } from './student-profile';
+export { Flashcard, type FlashcardAttrs } from './flashcard';
+export { FlashcardProgress, type FlashcardProgressAttrs } from './flashcard-progress';
 export { connectMongoose } from '../mongoose';

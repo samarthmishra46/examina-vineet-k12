@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "db:smoke": "dotenv -e .env.local -- tsx scripts/db-smoke.ts",
     "db:fix-indexes": "dotenv -e .env.local -- tsx scripts/fix-progress-indexes.ts",
-    "lesson:smoke": "dotenv -e .env.local -- tsx scripts/lesson-smoke.ts"
+    "lesson:smoke": "dotenv -e .env.local -- tsx scripts/lesson-smoke.ts",
+    "deploy": "git push origin main"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
