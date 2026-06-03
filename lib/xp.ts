@@ -57,9 +57,9 @@ export function getLevelProgress(xp: number): { level: number; rank: string; cur
 // Juice items and what level they unlock at
 export const JUICE_ITEMS = [
   { id: 'flash_mode', label: 'Flash Mode', desc: 'Spaced-repetition flashcards for every lesson.', unlockLevel: 2, icon: '⚡', href: '/flashcards' },
-  { id: 'cheat_sheets', label: "Aryan Sir's Cheat Sheets", desc: 'One-page formula sheets. Download & print.', unlockLevel: 3, icon: '📋', href: null },
-  { id: 'deep_dives', label: '"Why This Works" Deep Dives', desc: 'The story behind every formula.', unlockLevel: 4, icon: '🔬', href: null },
-  { id: 'pyq_bank', label: 'Past Year Questions', desc: 'Last 10 years of CBSE/JEE questions.', unlockLevel: 5, icon: '📚', href: null },
-  { id: 'speed_drills', label: 'Speed Drills', desc: '20 questions, 2 minutes. Pure speed.', unlockLevel: 6, icon: '🏃', href: null },
-  { id: 'mock_exam', label: 'Mock Exam Mode', desc: 'Full 3-hour simulated board exam.', unlockLevel: 9, icon: '🏆', href: null },
+  { id: 'cheat_sheets', label: "Aryan Sir's Cheat Sheets", desc: 'One-page formula sheets. Download & print.', unlockLevel: 3, icon: '📋', href: '/cheatsheets' },
+  { id: 'deep_dives', label: '"Why This Works" Deep Dives', desc: 'The story behind every formula.', unlockLevel: 4, icon: '🔬', href: '/deepdive' },
+  { id: 'pyq_bank', label: 'Past Year Questions', desc: 'Board-exam pattern questions by chapter.', unlockLevel: 5, icon: '📚', href: '/pyq' },
+  { id: 'speed_drills', label: 'Speed Drills', desc: '60 seconds per question. Pure speed.', unlockLevel: 6, icon: '🏃', href: '/drills' },
+  { id: 'mock_exam', label: 'Mock Exam Mode', desc: 'Timed 30-question exam across all chapters.', unlockLevel: 9, icon: '🏆', href: '/mock-exam' },
 ] as const;

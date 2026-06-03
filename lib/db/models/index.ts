@@ -8,4 +8,5 @@ export { GameProfile, type GameProfileAttrs } from './game-profile';
 export { StudentProfile, type StudentProfileAttrs } from './student-profile';
 export { Flashcard, type FlashcardAttrs } from './flashcard';
 export { FlashcardProgress, type FlashcardProgressAttrs } from './flashcard-progress';
+export { CheatSheet, type CheatSheetAttrs } from './cheatsheet';
 export { connectMongoose } from '../mongoose';
