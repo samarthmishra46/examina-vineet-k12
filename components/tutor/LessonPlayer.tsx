@@ -169,67 +169,7 @@ export function LessonPlayer({
     }
   }
 
-  // ── Prep screen ────────────────────────────────────────────────────────────
-  if (state === 'prep') {
-    return (
-      <div className="mx-auto max-w-2xl px-6 py-12">
-        <Link
-          href={`/chapter/${chapterId}`}
-          className="text-sm text-inkMuted transition-colors hover:text-ink"
-        >
-          ← {chapterTitle}
-        </Link>
-
-        <div className="mt-8 rounded-2xl border border-line bg-surface p-8 shadow-sm">
-          <div className="flex items-center gap-3">
-            <SiriAvatar speaking={false} className="h-12 w-12 shrink-0" />
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-accent">
-                Aryan Sir is ready
-              </p>
-              <h1 className="font-display text-2xl tracking-tight text-ink">{sectionTitle}</h1>
-            </div>
-          </div>
-
-          <div className="mt-6 rounded-xl border border-line bg-canvas p-5">
-            <p className="text-sm font-semibold text-ink">In this lesson you will:</p>
-            {learningObjectives.length > 0 ? (
-              <ul className="mt-3 space-y-2">
-                {learningObjectives.map((obj, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-inkMuted">
-                    <span className="mt-0.5 shrink-0 font-semibold text-accent">
-                      {String(i + 1).padStart(2, '0')}
-                    </span>
-                    {obj}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-sm text-inkMuted">
-                Follow Aryan Sir through the concepts step by step.
-              </p>
-            )}
-          </div>
-
-          <div className="mt-4 flex items-center gap-4 text-sm text-inkMuted">
-            <span>⏱ ~{estimatedMinutes} min</span>
-            <span>·</span>
-            <span>Section {String(sectionOrder).padStart(2, '0')}</span>
-          </div>
-
-          <Button size="lg" className="mt-6" onClick={startLesson}>
-            Start lesson with Aryan Sir →
-          </Button>
-
-          <p className="mt-3 text-xs text-inkMuted">
-            You can ask questions any time during the lesson
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Lesson player ──────────────────────────────────────────────────────────
+  // ── Lesson player (Whiteboard always mounted so wbRef is ready on start) ───
   return (
     <div className="mx-auto max-w-[1280px] px-6 py-8">
       <header className="mb-6 flex items-center justify-between gap-4">
@@ -259,6 +199,51 @@ export function LessonPlayer({
         <div className="relative overflow-hidden rounded-xl border border-line bg-surface shadow-sm">
           <Whiteboard ref={wbRef} />
           <EquationOverlay equations={equations} />
+
+          {/* Prep screen — shown as overlay so Whiteboard is already mounted when user clicks Start */}
+          {state === 'prep' && (
+            <div className="absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-canvas/95 backdrop-blur-sm p-8">
+              <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-8 shadow-lg">
+                <div className="flex items-center gap-3">
+                  <SiriAvatar speaking={false} className="h-12 w-12 shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-accent">
+                      Aryan Sir is ready
+                    </p>
+                    <h1 className="font-display text-2xl tracking-tight text-ink">{sectionTitle}</h1>
+                  </div>
+                </div>
+                <div className="mt-5 rounded-xl border border-line bg-canvas p-5">
+                  <p className="text-sm font-semibold text-ink">In this lesson you will:</p>
+                  {learningObjectives.length > 0 ? (
+                    <ul className="mt-3 space-y-2">
+                      {learningObjectives.map((obj, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-inkMuted">
+                          <span className="mt-0.5 shrink-0 font-semibold text-accent">
+                            {String(i + 1).padStart(2, '0')}
+                          </span>
+                          {obj}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm text-inkMuted">Follow Aryan Sir step by step.</p>
+                  )}
+                </div>
+                <div className="mt-3 flex items-center gap-3 text-xs text-inkMuted">
+                  <span>⏱ ~{estimatedMinutes} min</span>
+                  <span>·</span>
+                  <span>Section {String(sectionOrder).padStart(2, '0')}</span>
+                </div>
+                <Button size="lg" className="mt-5 w-full" onClick={startLesson}>
+                  Start lesson with Aryan Sir →
+                </Button>
+                <p className="mt-2 text-xs text-center text-inkMuted">
+                  You can ask questions any time during the lesson
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Preparing overlay */}
           {state === 'connecting' && (
