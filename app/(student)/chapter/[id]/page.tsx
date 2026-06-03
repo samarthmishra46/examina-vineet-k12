@@ -110,21 +110,24 @@ export default async function ChapterRoadmapPage({ params }: { params: { id: str
 function SectionPill({ status }: { status: SectionStatus }) {
   if (status === 'completed') {
     return (
-      <span className="rounded-full bg-accentMuted px-3 py-1 text-xs font-medium text-accent">
-        Completed
-      </span>
+      <div className="flex flex-col items-end gap-1">
+        <span className="rounded-full bg-accentMuted px-3 py-1 text-xs font-medium text-accent">
+          ✓ Done
+        </span>
+        <span className="text-xs text-inkMuted">Revisit →</span>
+      </div>
     );
   }
   if (status === 'in_progress') {
     return (
-      <span className="rounded-full border border-accent/30 px-3 py-1 text-xs font-medium text-accent">
+      <span className="rounded-full border border-accent/30 bg-accentMuted/40 px-3 py-1 text-xs font-medium text-accent">
         In progress
       </span>
     );
   }
   return (
     <span className="rounded-full border border-line px-3 py-1 text-xs font-medium text-inkMuted">
-      Not started
+      Start →
     </span>
   );
 }

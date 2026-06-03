@@ -5,10 +5,6 @@ import { LessonPlayer } from '@/components/tutor/LessonPlayer';
 import { requireAuth } from '@/lib/auth/helpers';
 import { Chapter, Section, connectMongoose } from '@/lib/db/models';
 
-/**
- * Marked force-dynamic because LessonPlayer transitively imports Excalidraw,
- * which references `navigator` at module load and crashes Node's prerender.
- */
 export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({
@@ -41,6 +37,8 @@ export default async function LearnPage({ params }: { params: { sectionId: strin
       chapterTitle={chapter.title}
       sectionTitle={section.title}
       sectionOrder={section.order}
+      learningObjectives={section.learningObjectives ?? []}
+      estimatedMinutes={section.estimatedMinutes ?? 10}
     />
   );
 }
