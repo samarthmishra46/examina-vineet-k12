@@ -7,6 +7,7 @@ import { requireAuth } from '@/lib/auth/helpers';
 import {
   Chapter,
   GameProfile,
+  PracticeAttempt,
   Progress,
   Section,
   StudentProfile,
@@ -40,9 +41,10 @@ export default async function DashboardPage() {
   ]);
 
   const chapterIds = chapters.map((c) => c._id);
-  const [sections, progressDocs] = await Promise.all([
+  const [sections, progressDocs, recentAttempts] = await Promise.all([
     Section.find({ chapterId: { $in: chapterIds } }).select('_id chapterId').lean(),
     Progress.find({ userId: uid }).lean(),
+    PracticeAttempt.find({ userId: uid }).sort({ createdAt: -1 }).limit(50).lean(),
   ]);
 
   const sectionsByChapter = new Map<string, string[]>();
@@ -62,8 +64,18 @@ export default async function DashboardPage() {
   const xp = gameProfile?.xp ?? 0;
   const streakDays = gameProfile?.streakDays ?? 0;
   const level = getLevelFromXP(xp);
-
   const classLabel = studentProfile ? `Class ${studentProfile.class} · ${studentProfile.board}` : null;
+
+  // Success predictor data
+  const totalSections = sections.length;
+  const completedSections = progressDocs.filter((p) => p.status === 'completed').length;
+  const completionPct = totalSections > 0 ? Math.round((completedSections / totalSections) * 100) : 0;
+  const practiceAccuracy = recentAttempts.length > 0
+    ? Math.round((recentAttempts.filter((a) => a.isCorrect).length / recentAttempts.length) * 100)
+    : null;
+  const remainingSections = totalSections - completedSections;
+  const avgPerDay = streakDays > 1 ? Math.max(1, Math.round(completedSections / streakDays)) : 1;
+  const daysToFinish = avgPerDay > 0 ? Math.ceil(remainingSections / avgPerDay) : null;
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
@@ -88,8 +100,60 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {/* Success Predictor */}
+      {totalSections > 0 && (
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          {/* Overall completion */}
+          <div className="rounded-xl border border-line bg-surface p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-inkMuted">Progress</p>
+            <div className="mt-2 flex items-end gap-2">
+              <span className="text-3xl font-bold text-ink">{completionPct}%</span>
+              <span className="mb-1 text-xs text-inkMuted">{completedSections}/{totalSections} sections</span>
+            </div>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-accentMuted">
+              <div className="h-full rounded-full bg-accent" style={{ width: `${completionPct}%` }} />
+            </div>
+          </div>
+
+          {/* Practice accuracy */}
+          <div className="rounded-xl border border-line bg-surface p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-inkMuted">Practice Accuracy</p>
+            <div className="mt-2 flex items-end gap-2">
+              <span className="text-3xl font-bold text-ink">
+                {practiceAccuracy !== null ? `${practiceAccuracy}%` : '—'}
+              </span>
+              <span className="mb-1 text-xs text-inkMuted">
+                {recentAttempts.length > 0 ? `last ${recentAttempts.length} questions` : 'no attempts yet'}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-inkMuted">
+              {practiceAccuracy !== null
+                ? practiceAccuracy >= 80 ? '🟢 Strong' : practiceAccuracy >= 60 ? '🟡 Room to improve' : '🔴 Needs work'
+                : 'Do some practice questions'}
+            </p>
+          </div>
+
+          {/* Completion prediction */}
+          <div className="rounded-xl border border-line bg-surface p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-inkMuted">Predicted Finish</p>
+            <div className="mt-2">
+              {completedSections === totalSections ? (
+                <p className="text-2xl font-bold text-accent">Done! 🎉</p>
+              ) : daysToFinish !== null && daysToFinish < 365 ? (
+                <>
+                  <span className="text-3xl font-bold text-ink">{daysToFinish}d</span>
+                  <p className="mt-1 text-xs text-inkMuted">at your current pace ({avgPerDay}/day)</p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-inkMuted">Complete more sections to predict</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Chapters */}
-      <div className="mt-10">
+      <div className="mt-8">
         <div className="mb-4 flex items-baseline justify-between">
           <h2 className="text-sm font-semibold tracking-wide text-inkMuted uppercase">Chapters</h2>
           <span className="text-xs text-inkMuted">{chapters.length} available</span>

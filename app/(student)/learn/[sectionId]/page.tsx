@@ -7,11 +7,7 @@ import { Chapter, Section, connectMongoose } from '@/lib/db/models';
 
 export const dynamic = 'force-dynamic';
 
-export async function generateMetadata({
-  params,
-}: {
-  params: { sectionId: string };
-}): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: { sectionId: string } }): Promise<Metadata> {
   if (!isValidObjectId(params.sectionId)) return { title: 'Lesson · Examina' };
   await connectMongoose();
   const section = await Section.findById(params.sectionId).select('title').lean();
@@ -30,6 +26,14 @@ export default async function LearnPage({ params }: { params: { sectionId: strin
   const chapter = await Chapter.findById(section.chapterId).lean();
   if (!chapter || chapter.status !== 'published') redirect('/dashboard');
 
+  // Find the next section in order so the LessonEnd screen can link to it
+  const nextSection = await Section.findOne({
+    chapterId: section.chapterId,
+    order: section.order + 1,
+  })
+    .select('_id title')
+    .lean();
+
   return (
     <LessonPlayer
       sectionId={section._id.toString()}
@@ -37,6 +41,8 @@ export default async function LearnPage({ params }: { params: { sectionId: strin
       chapterTitle={chapter.title}
       sectionTitle={section.title}
       sectionOrder={section.order}
+      nextSectionId={nextSection?._id.toString() ?? null}
+      nextSectionTitle={nextSection?.title ?? null}
       learningObjectives={section.learningObjectives ?? []}
       estimatedMinutes={section.estimatedMinutes ?? 10}
     />

@@ -17,6 +17,8 @@ interface Props {
   chapterTitle: string;
   sectionTitle: string;
   sectionOrder: number;
+  nextSectionId?: string | null;
+  nextSectionTitle?: string | null;
   learningObjectives?: string[];
   estimatedMinutes?: number;
 }
@@ -29,6 +31,8 @@ export function LessonPlayer({
   chapterTitle,
   sectionTitle,
   sectionOrder,
+  nextSectionId = null,
+  nextSectionTitle = null,
   learningObjectives = [],
   estimatedMinutes = 10,
 }: Props) {
@@ -45,6 +49,20 @@ export function LessonPlayer({
   const [error, setError] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [answering, setAnswering] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notes, setNotes] = useState('');
+
+  // Load saved notes from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(`notes_${sectionId}`);
+    if (saved) setNotes(saved);
+  }, [sectionId]);
+
+  // Auto-save notes
+  useEffect(() => {
+    const t = setTimeout(() => localStorage.setItem(`notes_${sectionId}`, notes), 500);
+    return () => clearTimeout(t);
+  }, [notes, sectionId]);
 
   // speaking = a narration is currently playing (drives SiriAvatar animation)
   const speaking = caption !== null && state === 'playing';
@@ -179,9 +197,20 @@ export function LessonPlayer({
         >
           ← {chapterTitle}
         </Link>
-        <p className="text-sm text-inkMuted">
-          Section {String(sectionOrder).padStart(2, '0')} · {sectionTitle}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-sm text-inkMuted">
+            Section {String(sectionOrder).padStart(2, '0')} · {sectionTitle}
+          </p>
+          {state === 'playing' && (
+            <button
+              type="button"
+              onClick={() => setNotesOpen((o) => !o)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${notesOpen ? 'border-accent bg-accentMuted text-accent' : 'border-line text-inkMuted hover:border-accent hover:text-accent'}`}
+            >
+              📝 Notes
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="mb-4 rounded-md border border-line bg-accentMuted px-4 py-3 text-sm text-accent lg:hidden">
@@ -271,7 +300,14 @@ export function LessonPlayer({
           )}
 
           {/* Lesson end screen */}
-          {state === 'ended' && <LessonEnd chapterId={chapterId} sectionId={sectionId} />}
+          {state === 'ended' && (
+            <LessonEnd
+              chapterId={chapterId}
+              sectionId={sectionId}
+              nextSectionId={nextSectionId}
+              nextSectionTitle={nextSectionTitle}
+            />
+          )}
 
           {/* Enable audio banner */}
           {audioBlocked && state !== 'ended' && (
@@ -310,6 +346,23 @@ export function LessonPlayer({
             >
               Skip ▸
             </button>
+          </div>
+        )}
+
+        {/* Notes panel */}
+        {notesOpen && (
+          <div className="mt-3 rounded-xl border border-line bg-surface shadow-sm">
+            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-inkMuted">📝 Your notes</p>
+              <p className="text-xs text-inkMuted">Auto-saved</p>
+            </div>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Jot down key points, formulas, or questions as you learn…"
+              rows={5}
+              className="block w-full resize-y rounded-b-xl bg-surface px-4 py-3 text-sm leading-relaxed text-ink outline-none placeholder:text-inkMuted/50 focus:ring-0"
+            />
           </div>
         )}
 
@@ -399,27 +452,63 @@ function DoubtPause({
 
 // ── LessonEnd ──────────────────────────────────────────────────────────────────
 
-function LessonEnd({ chapterId, sectionId }: { chapterId: string; sectionId: string }) {
+function LessonEnd({
+  chapterId,
+  sectionId,
+  nextSectionId,
+  nextSectionTitle,
+}: {
+  chapterId: string;
+  sectionId: string;
+  nextSectionId?: string | null;
+  nextSectionTitle?: string | null;
+}) {
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-canvas/90 backdrop-blur">
-      <div className="max-w-md rounded-2xl border border-line bg-surface p-10 text-center shadow-xl">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-accentMuted text-2xl">
+      <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-8 text-center shadow-xl mx-4">
+        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-accentMuted text-2xl">
           🎉
         </div>
         <p className="font-display text-3xl text-ink">Lesson complete!</p>
-        <p className="mt-3 text-sm text-inkMuted">
-          Marked as done. +100 XP earned. Flashcards generated.
-        </p>
-        <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-          <Link href={`/practice/${sectionId}`}>
-            <Button>Practice now →</Button>
-          </Link>
-          <Link
-            href={`/chapter/${chapterId}`}
-            className="text-sm text-inkMuted hover:text-ink"
-          >
-            Back to chapter
-          </Link>
+        <p className="mt-2 text-sm text-inkMuted">+100 XP · Flashcards ready · Progress saved</p>
+
+        <div className="mt-6 flex flex-col gap-2.5">
+          {/* Primary: next section or practice */}
+          {nextSectionId ? (
+            <Link href={`/learn/${nextSectionId}`} className="block">
+              <Button className="w-full">
+                Next: {nextSectionTitle ?? 'Next section'} →
+              </Button>
+            </Link>
+          ) : (
+            <Link href={`/practice/${sectionId}`} className="block">
+              <Button className="w-full">Practice this section →</Button>
+            </Link>
+          )}
+
+          {/* Secondary actions */}
+          <div className="flex items-center justify-center gap-4">
+            <Link
+              href={`/practice/${sectionId}`}
+              className="text-xs text-inkMuted hover:text-accent transition-colors"
+            >
+              Practice
+            </Link>
+            <span className="text-inkMuted">·</span>
+            <Link
+              href={`/chapter/${chapterId}`}
+              className="text-xs text-inkMuted hover:text-accent transition-colors"
+            >
+              Chapter roadmap
+            </Link>
+            <span className="text-inkMuted">·</span>
+            <Link
+              href="/flashcards"
+              className="text-xs text-inkMuted hover:text-accent transition-colors"
+            >
+              Flash cards
+            </Link>
+          </div>
         </div>
       </div>
     </div>
