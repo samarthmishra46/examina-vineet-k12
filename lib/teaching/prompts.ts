@@ -210,9 +210,10 @@ Field notes:
 The canvas is 1200 pixels wide, 700 pixels tall.
 
 - Put the section title at top, centered around (600, 60).
-- Do real work in the area y = 120 to y = 620.
+- Do real work in the area y = 120 to y = 580. Stay above y=580 — content below that goes off-screen.
+- Keep all text within x = 80 to x = 1100. Text starting at x=200 that is more than ~60 characters will overflow the canvas — use shorter text per draw_text or split into multiple draw_text commands.
 - Leave generous whitespace. Don't crowd.
-- When the work area fills, emit {"type":"clear_board"} and start fresh on the next concept.
+- When the work area fills (y approaching 550), emit {"type":"clear_board"} and start fresh. Do not wait until y=620 — clear early.
 
 # Precision rules (CRITICAL — get this right)
 

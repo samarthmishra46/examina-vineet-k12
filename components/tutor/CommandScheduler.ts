@@ -49,6 +49,9 @@ export class CommandScheduler {
   private continueResolver: (() => void) | null = null;
   private quickCheckResolver: (() => void) | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
+  // freeze/unfreeze: pause the playback loop so a user-initiated doubt can run cleanly
+  private freezeResolver: (() => void) | null = null;
+  private frozen = false;
 
   constructor(private deps: SchedulerDeps) {}
 
@@ -102,12 +105,28 @@ export class CommandScheduler {
     this.quickCheckResolver?.();
   }
 
+  /** Freeze playback so a user-initiated doubt runs without interference. */
+  freeze(): void {
+    this.frozen = true;
+    this.skip(); // stop current speech immediately
+  }
+
+  /** Resume playback after a user-initiated doubt finishes. */
+  unfreeze(): void {
+    this.frozen = false;
+    const r = this.freezeResolver;
+    this.freezeResolver = null;
+    r?.();
+  }
+
   /** Tear down; resolves any pending waits so run() finishes. */
   abort(): void {
     this.aborted = true;
+    this.frozen = false;
     this.skipResolver?.();
     this.continueResolver?.();
     this.quickCheckResolver?.();
+    this.freezeResolver?.();
     this.commandAvailable?.();
     try {
       this.currentSource?.stop();
@@ -156,6 +175,11 @@ export class CommandScheduler {
 
   private async runPlayback(): Promise<void> {
     while (!this.aborted) {
+      // If frozen (user asked a question), wait until unfreeze() is called
+      if (this.frozen) {
+        await new Promise<void>((r) => { this.freezeResolver = r; });
+      }
+      if (this.aborted) return;
       const cmd = await this.nextCommand();
       if (!cmd) {
         this.flushDraws();

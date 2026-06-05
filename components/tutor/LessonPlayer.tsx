@@ -51,6 +51,8 @@ export function LessonPlayer({
   const [answering, setAnswering] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState('');
+  const [askText, setAskText] = useState('');
+  const askInputRef = useRef<HTMLInputElement>(null);
 
   // Load saved notes from localStorage
   useEffect(() => {
@@ -187,6 +189,43 @@ export function LessonPlayer({
     }
   }
 
+  // User-initiated question — freeze lesson, ask, then resume
+  async function handleUserAsk() {
+    const text = askText.trim();
+    if (!text || answering) return;
+    const scheduler = schedulerRef.current;
+    if (!scheduler) return;
+    setAskText('');
+    scheduler.freeze(); // pause the main lesson stream
+    setAnswering(true);
+    try {
+      const res = await fetch('/api/doubt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sectionId,
+          doubt: text,
+          recentNarrations: scheduler.getNarrateHistory().slice(-4),
+        }),
+      });
+      if (!res.ok || !res.body) throw new Error('Ask failed');
+      await scheduler.continueWithDoubt(parseNdjsonStream(res.body));
+    } catch {
+      // ignore — just resume
+    } finally {
+      setAnswering(false);
+      scheduler.unfreeze(); // resume main lesson
+    }
+  }
+
+  function handleStop() {
+    controllerRef.current?.abort();
+    schedulerRef.current?.abort();
+    void audioContextRef.current?.close().catch(() => undefined);
+    if (typeof window !== 'undefined') window.speechSynthesis.cancel();
+    setState('ended');
+  }
+
   // ── Lesson player (Whiteboard always mounted so wbRef is ready on start) ───
   return (
     <div className="mx-auto max-w-[1280px] px-6 py-8">
@@ -197,20 +236,9 @@ export function LessonPlayer({
         >
           ← {chapterTitle}
         </Link>
-        <div className="flex items-center gap-3">
-          <p className="text-sm text-inkMuted">
-            Section {String(sectionOrder).padStart(2, '0')} · {sectionTitle}
-          </p>
-          {state === 'playing' && (
-            <button
-              type="button"
-              onClick={() => setNotesOpen((o) => !o)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${notesOpen ? 'border-accent bg-accentMuted text-accent' : 'border-line text-inkMuted hover:border-accent hover:text-accent'}`}
-            >
-              📝 Notes
-            </button>
-          )}
-        </div>
+        <p className="text-sm text-inkMuted">
+          Section {String(sectionOrder).padStart(2, '0')} · {sectionTitle}
+        </p>
       </header>
 
       <div className="mb-4 rounded-md border border-line bg-accentMuted px-4 py-3 text-sm text-accent lg:hidden">
@@ -329,8 +357,31 @@ export function LessonPlayer({
 
           {/* Siri avatar — bottom right */}
           {(state === 'playing' || state === 'connecting') && (
-            <div className="absolute bottom-4 right-4 z-30 flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-line bg-ink/90 shadow-lg lg:h-32 lg:w-32">
+            <div className="absolute bottom-4 right-4 z-30 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-line bg-ink/90 shadow-lg lg:h-28 lg:w-28">
               <SiriAvatar speaking={speaking} className="h-full w-full" />
+            </div>
+          )}
+
+          {/* Floating notes panel — overlaid on whiteboard top-right */}
+          {notesOpen && state === 'playing' && (
+            <div className="absolute right-4 top-4 z-50 w-72 rounded-xl border border-line bg-white/95 shadow-xl backdrop-blur-sm">
+              <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+                <p className="text-xs font-semibold text-inkMuted">📝 Notes (auto-saved)</p>
+                <button
+                  type="button"
+                  onClick={() => setNotesOpen(false)}
+                  className="text-inkMuted hover:text-ink text-base leading-none"
+                >
+                  ×
+                </button>
+              </div>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Key points, formulas, questions…"
+                rows={6}
+                className="block w-full resize-none rounded-b-xl bg-transparent px-4 py-3 text-sm text-ink outline-none placeholder:text-inkMuted/50"
+              />
             </div>
           )}
         </div>
@@ -349,20 +400,62 @@ export function LessonPlayer({
           </div>
         )}
 
-        {/* Notes panel */}
-        {notesOpen && (
-          <div className="mt-3 rounded-xl border border-line bg-surface shadow-sm">
-            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-              <p className="text-xs font-semibold uppercase tracking-wide text-inkMuted">📝 Your notes</p>
-              <p className="text-xs text-inkMuted">Auto-saved</p>
+        {/* ── Bottom control bar — shown during lesson ── */}
+        {(state === 'playing' || state === 'connecting') && (
+          <div className="mt-3 flex items-center gap-2">
+            {/* Ask Aryan Sir input */}
+            <div className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2.5 shadow-sm focus-within:border-accent">
+              <span className="text-sm shrink-0">💬</span>
+              <input
+                ref={askInputRef}
+                type="text"
+                value={askText}
+                onChange={(e) => setAskText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleUserAsk(); }
+                }}
+                placeholder="Ask Aryan Sir anything…"
+                disabled={answering || state === 'connecting'}
+                className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-inkMuted/60 disabled:opacity-50"
+              />
+              {askText.trim() && (
+                <button
+                  type="button"
+                  onClick={() => void handleUserAsk()}
+                  disabled={answering}
+                  className="shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white hover:bg-accentHover disabled:opacity-50"
+                >
+                  Ask →
+                </button>
+              )}
+              {answering && (
+                <span className="shrink-0 text-xs text-accent animate-pulse">Answering…</span>
+              )}
             </div>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Jot down key points, formulas, or questions as you learn…"
-              rows={5}
-              className="block w-full resize-y rounded-b-xl bg-surface px-4 py-3 text-sm leading-relaxed text-ink outline-none placeholder:text-inkMuted/50 focus:ring-0"
-            />
+
+            {/* Notes toggle */}
+            {state === 'playing' && (
+              <button
+                type="button"
+                onClick={() => setNotesOpen((o) => !o)}
+                title="Toggle notes"
+                className={`rounded-xl border px-3 py-2.5 text-sm transition-colors ${notesOpen ? 'border-accent bg-accentMuted text-accent' : 'border-line bg-surface text-inkMuted hover:border-accent hover:text-accent'}`}
+              >
+                📝
+              </button>
+            )}
+
+            {/* Stop lesson */}
+            {state === 'playing' && (
+              <button
+                type="button"
+                onClick={handleStop}
+                title="Stop lesson"
+                className="rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-inkMuted hover:border-danger hover:text-danger transition-colors"
+              >
+                ⏹
+              </button>
+            )}
           </div>
         )}
 
