@@ -133,9 +133,13 @@ export function LessonPlayer({
       clearEquations: () => setEquations([]),
       setEnded: () => setState('ended'),
       shouldRouteAudioLocally: () => !avatarReadyRef.current,
-      sayViaAvatar: avatarReadyRef.current
-        ? (text) => avatarRef.current!.say(text)
-        : undefined,
+      // Always provide the function — it reads the ref at call time, so the
+      // avatar will be used once it connects (even if not ready at creation).
+      sayViaAvatar: (text: string) => {
+        const a = avatarRef.current;
+        if (!a) return Promise.reject(new Error('avatar not mounted'));
+        return a.say(text);
+      },
     });
     schedulerRef.current = scheduler;
 
@@ -268,6 +272,29 @@ export function LessonPlayer({
   function handleInterrupt() {
     if (!answering) schedulerRef.current?.skip();
     else avatarRef.current?.interrupt();
+  }
+
+  // Full reset — used by both "Replay lesson" and error recovery.
+  // Cleans up all in-progress state so the prep screen can start fresh.
+  function handleReplay() {
+    controllerRef.current?.abort();
+    schedulerRef.current?.abort();
+    void audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+    if (typeof window !== 'undefined') window.speechSynthesis.cancel();
+    wbRef.current?.clear();
+    schedulerRef.current = null;
+    controllerRef.current = null;
+    setCaption(null);
+    setDoubtPrompt(null);
+    setQuickCheckQuestions(null);
+    setEquations([]);
+    setAnswering(false);
+    setPaused(false);
+    setElapsedSeconds(0);
+    setAvatarReady(false);
+    avatarReadyRef.current = false;
+    setState('prep');
   }
 
   function handleStop() {
@@ -438,6 +465,7 @@ export function LessonPlayer({
                 sectionId={sectionId}
                 nextSectionId={nextSectionId}
                 nextSectionTitle={nextSectionTitle}
+                onReplay={handleReplay}
               />
             )}
 
@@ -738,10 +766,10 @@ export function LessonPlayer({
           {error}
           <button
             type="button"
-            onClick={() => { setState('prep'); setError(null); }}
+            onClick={() => { handleReplay(); setError(null); }}
             className="ml-4 underline"
           >
-            Go back
+            Try again
           </button>
         </div>
       )}
@@ -822,11 +850,13 @@ function LessonEnd({
   sectionId,
   nextSectionId,
   nextSectionTitle,
+  onReplay,
 }: {
   chapterId: string;
   sectionId: string;
   nextSectionId?: string | null;
   nextSectionTitle?: string | null;
+  onReplay: () => void;
 }) {
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-canvas/90 backdrop-blur">
@@ -851,9 +881,14 @@ function LessonEnd({
           )}
 
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Link href={`/learn/${sectionId}`} className="text-xs text-inkMuted hover:text-accent transition-colors">
+            {/* Use a button — not a Link — so we properly reset state for same-URL replay */}
+            <button
+              type="button"
+              onClick={onReplay}
+              className="text-xs text-inkMuted hover:text-accent transition-colors"
+            >
               Replay lesson
-            </Link>
+            </button>
             <span className="text-inkMuted">·</span>
             <Link href={`/practice/${sectionId}`} className="text-xs text-inkMuted hover:text-accent transition-colors">
               Practice

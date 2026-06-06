@@ -36,6 +36,7 @@ export default async function LearnPage({ params }: { params: { sectionId: strin
 
   return (
     <LessonPlayer
+      key={section._id.toString()}
       sectionId={section._id.toString()}
       chapterId={chapter._id.toString()}
       chapterTitle={chapter.title}
