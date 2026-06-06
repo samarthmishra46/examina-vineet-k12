@@ -15,6 +15,10 @@ const ChapterSchema = new Schema(
       index: true,
     },
     createdBy: { type: Schema.Types.ObjectId, required: true },
+    // NCERT / board exam metadata (optional — set by admin)
+    ncertClass: { type: String, default: '' },    // e.g. "Class 10"
+    ncertSubject: { type: String, default: '' },  // e.g. "Mathematics"
+    examWeightPct: { type: Number, default: 0 },  // % weight in board exam (0 = unknown)
   },
   { timestamps: true },
 );

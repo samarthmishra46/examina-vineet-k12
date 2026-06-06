@@ -21,8 +21,11 @@ export async function POST() {
     return NextResponse.json({ error: 'Avatar not configured' }, { status: 503 });
   }
 
+  // Optional Indian voice override — set NEXT_PUBLIC_HEYGEN_VOICE_ID in env
+  const voiceId = env.NEXT_PUBLIC_HEYGEN_VOICE_ID;
+
   try {
-    const session = await createHeyGenSession(avatarId);
+    const session = await createHeyGenSession(avatarId, voiceId);
     return NextResponse.json(session);
   } catch (err) {
     console.error('[avatar/session] failed:', err);

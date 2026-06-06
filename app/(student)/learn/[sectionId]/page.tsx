@@ -45,6 +45,9 @@ export default async function LearnPage({ params }: { params: { sectionId: strin
       nextSectionTitle={nextSection?.title ?? null}
       learningObjectives={section.learningObjectives ?? []}
       estimatedMinutes={section.estimatedMinutes ?? 10}
+      ncertClass={chapter.ncertClass ?? ''}
+      ncertSubject={chapter.ncertSubject ?? ''}
+      examWeightPct={chapter.examWeightPct ?? 0}
     />
   );
 }

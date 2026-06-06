@@ -52,6 +52,9 @@ export class CommandScheduler {
   // freeze/unfreeze: pause the playback loop so a user-initiated doubt can run cleanly
   private freezeResolver: (() => void) | null = null;
   private frozen = false;
+  // pause/resume: user-initiated lesson pause (suspends audio, holds playback between commands)
+  private pausedState = false;
+  private pauseResolver: (() => void) | null = null;
 
   constructor(private deps: SchedulerDeps) {}
 
@@ -119,14 +122,43 @@ export class CommandScheduler {
     r?.();
   }
 
+  /** Pause lesson: suspend audio and hold between commands. */
+  pausePlayback(): void {
+    if (this.pausedState) return;
+    this.pausedState = true;
+    this.deps.audioContext?.suspend().catch(() => {});
+    if (CommandScheduler.webSpeechAvailable()) {
+      window.speechSynthesis.pause();
+    }
+  }
+
+  /** Resume lesson after pausePlayback(). */
+  resumePlayback(): void {
+    if (!this.pausedState) return;
+    this.pausedState = false;
+    this.deps.audioContext?.resume().catch(() => {});
+    if (CommandScheduler.webSpeechAvailable()) {
+      window.speechSynthesis.resume();
+    }
+    const r = this.pauseResolver;
+    this.pauseResolver = null;
+    r?.();
+  }
+
+  get isPaused(): boolean {
+    return this.pausedState;
+  }
+
   /** Tear down; resolves any pending waits so run() finishes. */
   abort(): void {
     this.aborted = true;
     this.frozen = false;
+    this.pausedState = false;
     this.skipResolver?.();
     this.continueResolver?.();
     this.quickCheckResolver?.();
     this.freezeResolver?.();
+    this.pauseResolver?.();
     this.commandAvailable?.();
     try {
       this.currentSource?.stop();
@@ -178,6 +210,10 @@ export class CommandScheduler {
       // If frozen (user asked a question), wait until unfreeze() is called
       if (this.frozen) {
         await new Promise<void>((r) => { this.freezeResolver = r; });
+      }
+      // If user-paused, hold here between commands until resumePlayback()
+      if (this.pausedState) {
+        await new Promise<void>((r) => { this.pauseResolver = r; });
       }
       if (this.aborted) return;
       const cmd = await this.nextCommand();

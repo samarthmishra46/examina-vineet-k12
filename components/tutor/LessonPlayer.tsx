@@ -8,6 +8,7 @@ import { Whiteboard, type WhiteboardHandle } from '@/components/whiteboard/White
 import { markSectionCompleted, markSectionStarted } from '@/lib/actions/progress';
 import type { QuickCheckQuestion } from '@/lib/teaching/command-schema';
 import { CommandScheduler } from './CommandScheduler';
+import { HeyGenAvatar, type HeyGenAvatarHandle } from './HeyGenAvatar';
 import { SiriAvatar } from './SiriAvatar';
 import { parseNdjsonStream } from './parse-ndjson';
 
@@ -21,6 +22,9 @@ interface Props {
   nextSectionTitle?: string | null;
   learningObjectives?: string[];
   estimatedMinutes?: number;
+  ncertClass?: string;
+  ncertSubject?: string;
+  examWeightPct?: number;
 }
 
 type PlayState = 'prep' | 'connecting' | 'playing' | 'ended' | 'error';
@@ -35,11 +39,17 @@ export function LessonPlayer({
   nextSectionTitle = null,
   learningObjectives = [],
   estimatedMinutes = 10,
+  ncertClass = '',
+  ncertSubject = '',
+  examWeightPct = 0,
 }: Props) {
   const wbRef = useRef<WhiteboardHandle>(null);
   const schedulerRef = useRef<CommandScheduler | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const avatarRef = useRef<HeyGenAvatarHandle>(null);
+  const avatarReadyRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [caption, setCaption] = useState<string | null>(null);
   const [doubtPrompt, setDoubtPrompt] = useState<string | null>(null);
@@ -52,28 +62,56 @@ export function LessonPlayer({
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState('');
   const [askText, setAskText] = useState('');
+  const [paused, setPaused] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [avatarReady, setAvatarReady] = useState(false);
   const askInputRef = useRef<HTMLInputElement>(null);
 
-  // Load saved notes from localStorage
+  // Load/auto-save notes
   useEffect(() => {
     const saved = localStorage.getItem(`notes_${sectionId}`);
     if (saved) setNotes(saved);
   }, [sectionId]);
-
-  // Auto-save notes
   useEffect(() => {
     const t = setTimeout(() => localStorage.setItem(`notes_${sectionId}`, notes), 500);
     return () => clearTimeout(t);
   }, [notes, sectionId]);
 
-  // speaking = a narration is currently playing (drives SiriAvatar animation)
-  const speaking = caption !== null && state === 'playing';
+  // Elapsed time timer — only ticks when playing and not paused
+  useEffect(() => {
+    if (state === 'playing' && !paused) {
+      timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    } else {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    }
+    return () => {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    };
+  }, [state, paused]);
+
+  const speaking = caption !== null && state === 'playing' && !paused;
+
+  // Teacher state label shown in the panel
+  function teacherStateLabel(): string {
+    if (state === 'connecting') return 'Preparing your lesson…';
+    if (answering) return 'Aryan Sir is answering…';
+    if (paused) return 'Paused — waiting for you';
+    if (caption) return 'Aryan Sir is explaining…';
+    if (state === 'playing') return 'Aryan Sir is writing on the board…';
+    return '';
+  }
+
+  // Time display
+  const totalSeconds = estimatedMinutes * 60;
+  const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds);
+  const remMin = Math.floor(remainingSeconds / 60);
+  const remSec = String(remainingSeconds % 60).padStart(2, '0');
+  const timeLabel = remainingSeconds > 0 ? `${remMin}:${remSec} left` : 'Almost done!';
 
   const startLesson = useCallback(() => {
     const wb = wbRef.current;
     if (!wb) return;
 
-    // Initialise AudioContext on user gesture (required by browsers)
     const AudioCtor =
       typeof window !== 'undefined'
         ? window.AudioContext ??
@@ -94,7 +132,10 @@ export function LessonPlayer({
       addEquation: (eq) => setEquations((prev) => [...prev, eq]),
       clearEquations: () => setEquations([]),
       setEnded: () => setState('ended'),
-      shouldRouteAudioLocally: () => true, // always use OpenAI TTS
+      shouldRouteAudioLocally: () => !avatarReadyRef.current,
+      sayViaAvatar: avatarReadyRef.current
+        ? (text) => avatarRef.current!.say(text)
+        : undefined,
     });
     schedulerRef.current = scheduler;
 
@@ -102,6 +143,8 @@ export function LessonPlayer({
     controllerRef.current = controller;
 
     setState('connecting');
+    setPaused(false);
+    setElapsedSeconds(0);
 
     void (async () => {
       try {
@@ -125,7 +168,7 @@ export function LessonPlayer({
     })();
   }, [sectionId]);
 
-  // Cleanup on unmount
+  // Cleanup
   useEffect(() => {
     return () => {
       controllerRef.current?.abort();
@@ -148,17 +191,22 @@ export function LessonPlayer({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'lesson_complete' }),
     }).catch(() => undefined);
-    fetch(`/api/flashcards/generate?sectionId=${sectionId}`, {
-      method: 'POST',
-    }).catch(() => undefined);
+    fetch(`/api/flashcards/generate?sectionId=${sectionId}`, { method: 'POST' }).catch(() => undefined);
   }, [state, sectionId]);
 
   async function enableAudio() {
-    try {
-      await audioContextRef.current?.resume();
-      setAudioBlocked(false);
-    } catch {
-      /* ignore */
+    try { await audioContextRef.current?.resume(); setAudioBlocked(false); } catch { /* ignore */ }
+  }
+
+  function handlePauseResume() {
+    const scheduler = schedulerRef.current;
+    if (!scheduler) return;
+    if (paused) {
+      scheduler.resumePlayback();
+      setPaused(false);
+    } else {
+      scheduler.pausePlayback();
+      setPaused(true);
     }
   }
 
@@ -189,14 +237,13 @@ export function LessonPlayer({
     }
   }
 
-  // User-initiated question — freeze lesson, ask, then resume
   async function handleUserAsk() {
     const text = askText.trim();
     if (!text || answering) return;
     const scheduler = schedulerRef.current;
     if (!scheduler) return;
     setAskText('');
-    scheduler.freeze(); // pause the main lesson stream
+    scheduler.freeze();
     setAnswering(true);
     try {
       const res = await fetch('/api/doubt', {
@@ -211,11 +258,16 @@ export function LessonPlayer({
       if (!res.ok || !res.body) throw new Error('Ask failed');
       await scheduler.continueWithDoubt(parseNdjsonStream(res.body));
     } catch {
-      // ignore — just resume
+      // resume silently on error
     } finally {
       setAnswering(false);
-      scheduler.unfreeze(); // resume main lesson
+      scheduler.unfreeze();
     }
+  }
+
+  function handleInterrupt() {
+    if (!answering) schedulerRef.current?.skip();
+    else avatarRef.current?.interrupt();
   }
 
   function handleStop() {
@@ -226,253 +278,473 @@ export function LessonPlayer({
     setState('ended');
   }
 
-  // ── Lesson player (Whiteboard always mounted so wbRef is ready on start) ───
+  const showControls = state === 'playing' || state === 'connecting';
+
   return (
-    <div className="mx-auto max-w-[1280px] px-6 py-8">
-      <header className="mb-6 flex items-center justify-between gap-4">
+    <div className="mx-auto max-w-[1400px] px-4 py-4 lg:px-6 lg:py-6">
+
+      {/* ── Header bar ── */}
+      <header className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <Link
           href={`/chapter/${chapterId}`}
-          className="text-sm text-inkMuted transition-colors duration-std ease-std hover:text-ink"
+          className="text-sm text-inkMuted transition-colors hover:text-ink"
         >
           ← {chapterTitle}
         </Link>
-        <p className="text-sm text-inkMuted">
+        <span className="text-inkMuted/40">|</span>
+        <p className="text-sm font-medium text-ink">
           Section {String(sectionOrder).padStart(2, '0')} · {sectionTitle}
         </p>
-      </header>
 
-      <div className="mb-4 rounded-md border border-line bg-accentMuted px-4 py-3 text-sm text-accent lg:hidden">
-        Lessons work best on a desktop screen. Scroll right on mobile to see the full whiteboard.
-      </div>
-
-      <div className="relative">
-        {/* Connecting progress bar */}
-        {state === 'connecting' && (
-          <div className="absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden">
-            <div className="h-full w-2/3 animate-pulse rounded-full bg-accent" />
+        {/* NCERT & exam weight badge */}
+        {(ncertClass || ncertSubject || examWeightPct > 0) && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {(ncertClass || ncertSubject) && (
+              <span className="rounded-full bg-blue-50 px-3 py-0.5 text-xs font-medium text-blue-700 border border-blue-200">
+                📚 {[ncertClass, ncertSubject].filter(Boolean).join(' · ')}
+              </span>
+            )}
+            {examWeightPct > 0 && (
+              <span className="rounded-full bg-amber-50 px-3 py-0.5 text-xs font-medium text-amber-700 border border-amber-200">
+                🎯 {examWeightPct}% of CBSE paper
+              </span>
+            )}
           </div>
         )}
+      </header>
 
-        <div className="relative overflow-hidden rounded-xl border border-line bg-surface shadow-sm">
-          <Whiteboard ref={wbRef} />
-          <EquationOverlay equations={equations} />
+      {/* Mobile warning */}
+      <div className="mb-3 rounded-md border border-line bg-accentMuted px-4 py-2.5 text-sm text-accent lg:hidden">
+        Lessons work best on a desktop screen.
+      </div>
 
-          {/* Prep screen — shown as overlay so Whiteboard is already mounted when user clicks Start */}
-          {state === 'prep' && (
-            <div className="absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-canvas/95 backdrop-blur-sm p-8">
-              <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-8 shadow-lg">
-                <div className="flex items-center gap-3">
-                  <SiriAvatar speaking={false} className="h-12 w-12 shrink-0" />
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-accent">
-                      Aryan Sir is ready
-                    </p>
-                    <h1 className="font-display text-2xl tracking-tight text-ink">{sectionTitle}</h1>
-                  </div>
-                </div>
-                <div className="mt-5 rounded-xl border border-line bg-canvas p-5">
-                  <p className="text-sm font-semibold text-ink">In this lesson you will:</p>
-                  {learningObjectives.length > 0 ? (
-                    <ul className="mt-3 space-y-2">
-                      {learningObjectives.map((obj, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-inkMuted">
-                          <span className="mt-0.5 shrink-0 font-semibold text-accent">
-                            {String(i + 1).padStart(2, '0')}
-                          </span>
-                          {obj}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="mt-2 text-sm text-inkMuted">Follow Aryan Sir step by step.</p>
-                  )}
-                </div>
-                <div className="mt-3 flex items-center gap-3 text-xs text-inkMuted">
-                  <span>⏱ ~{estimatedMinutes} min</span>
-                  <span>·</span>
-                  <span>Section {String(sectionOrder).padStart(2, '0')}</span>
-                </div>
-                <Button size="lg" className="mt-5 w-full" onClick={startLesson}>
-                  Start lesson with Aryan Sir →
-                </Button>
-                <p className="mt-2 text-xs text-center text-inkMuted">
-                  You can ask questions any time during the lesson
-                </p>
-              </div>
-            </div>
-          )}
+      {/* ── Main lesson area: whiteboard (left) + teacher panel (right) ── */}
+      <div className="flex gap-4">
 
-          {/* Preparing overlay */}
+        {/* Whiteboard column */}
+        <div className="relative min-w-0 flex-1">
           {state === 'connecting' && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-4 bg-canvas/70 backdrop-blur-sm">
-              <SiriAvatar speaking={false} className="h-20 w-20" />
-              <p className="text-sm font-medium text-inkMuted">Aryan Sir is preparing your lesson…</p>
+            <div className="absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden rounded-full">
+              <div className="h-full w-3/4 animate-pulse rounded-full bg-accent" />
             </div>
           )}
 
-          {/* Doubt pause overlay */}
-          {doubtPrompt && state === 'playing' && (
-            <DoubtPause
-              prompt={doubtPrompt}
-              onContinue={() => schedulerRef.current?.continue()}
-              onSubmit={submitDoubt}
-            />
-          )}
+          <div className="relative overflow-hidden rounded-xl border border-line bg-surface shadow-sm">
+            <Whiteboard ref={wbRef} />
+            <EquationOverlay equations={equations} />
 
-          {/* Quick check overlay */}
-          {quickCheckQuestions && state === 'playing' && (
-            <QuickCheckOverlay
-              questions={quickCheckQuestions}
-              onDone={() => schedulerRef.current?.continueAfterQuickCheck()}
-            />
-          )}
+            {/* Prep screen overlay */}
+            {state === 'prep' && (
+              <div className="absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-canvas/95 backdrop-blur-sm p-6">
+                <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-7 shadow-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl border border-line bg-ink/90 shadow-md">
+                      <SiriAvatar speaking={false} className="h-full w-full" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-accent">
+                        Aryan Sir is ready
+                      </p>
+                      <h1 className="font-display text-xl tracking-tight text-ink">{sectionTitle}</h1>
+                    </div>
+                  </div>
 
-          {/* Lesson end screen */}
-          {state === 'ended' && (
-            <LessonEnd
-              chapterId={chapterId}
-              sectionId={sectionId}
-              nextSectionId={nextSectionId}
-              nextSectionTitle={nextSectionTitle}
-            />
-          )}
+                  {/* Exam weight info on prep card */}
+                  {examWeightPct > 0 && (
+                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+                      <p className="text-xs font-semibold text-amber-800">
+                        🎯 This chapter carries <span className="text-base font-bold">{examWeightPct}%</span> weightage in the CBSE exam
+                        {ncertClass ? ` for ${ncertClass}` : ''}.
+                        Pay close attention!
+                      </p>
+                    </div>
+                  )}
 
-          {/* Enable audio banner */}
-          {audioBlocked && state !== 'ended' && (
-            <button
-              type="button"
-              onClick={enableAudio}
-              className="absolute right-4 top-4 z-40 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white shadow-md hover:bg-accentHover"
-            >
-              Enable sound
-            </button>
-          )}
+                  <div className="mt-4 rounded-xl border border-line bg-canvas p-4">
+                    <p className="text-sm font-semibold text-ink">In this lesson you will:</p>
+                    {learningObjectives.length > 0 ? (
+                      <ul className="mt-2 space-y-1.5">
+                        {learningObjectives.map((obj, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm text-inkMuted">
+                            <span className="mt-0.5 shrink-0 font-bold text-accent">
+                              {String(i + 1).padStart(2, '0')}
+                            </span>
+                            {obj}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-inkMuted">Follow Aryan Sir step by step.</p>
+                    )}
+                  </div>
 
-          {/* Answering doubt indicator */}
-          {answering && (
-            <div className="pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-full bg-ink/85 px-4 py-1.5 text-sm font-medium text-white shadow-md">
-              Thinking…
-            </div>
-          )}
-
-          {/* Siri avatar — bottom right */}
-          {(state === 'playing' || state === 'connecting') && (
-            <div className="absolute bottom-4 right-4 z-30 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-line bg-ink/90 shadow-lg lg:h-28 lg:w-28">
-              <SiriAvatar speaking={speaking} className="h-full w-full" />
-            </div>
-          )}
-
-          {/* Floating notes panel — overlaid on whiteboard top-right */}
-          {notesOpen && state === 'playing' && (
-            <div className="absolute right-4 top-4 z-50 w-72 rounded-xl border border-line bg-white/95 shadow-xl backdrop-blur-sm">
-              <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-                <p className="text-xs font-semibold text-inkMuted">📝 Notes (auto-saved)</p>
-                <button
-                  type="button"
-                  onClick={() => setNotesOpen(false)}
-                  className="text-inkMuted hover:text-ink text-base leading-none"
-                >
-                  ×
-                </button>
+                  <div className="mt-3 flex items-center gap-3 text-xs text-inkMuted">
+                    <span>⏱ ~{estimatedMinutes} min</span>
+                    <span>·</span>
+                    <span>Section {String(sectionOrder).padStart(2, '0')}</span>
+                    <span>·</span>
+                    <span>Ask any time</span>
+                  </div>
+                  <Button size="lg" className="mt-4 w-full" onClick={startLesson}>
+                    Start lesson with Aryan Sir →
+                  </Button>
+                </div>
               </div>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Key points, formulas, questions…"
-                rows={6}
-                className="block w-full resize-none rounded-b-xl bg-transparent px-4 py-3 text-sm text-ink outline-none placeholder:text-inkMuted/50"
+            )}
+
+            {/* Connecting overlay */}
+            {state === 'connecting' && (
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-5 bg-canvas/75 backdrop-blur-sm">
+                <div className="h-20 w-20 overflow-hidden rounded-2xl border border-line bg-ink/90 shadow-lg">
+                  <SiriAvatar speaking={false} className="h-full w-full" />
+                </div>
+                <div className="space-y-1 text-center">
+                  <p className="text-sm font-semibold text-ink">Aryan Sir is preparing your lesson…</p>
+                  <p className="text-xs text-inkMuted">Drawing the board, setting up explanations</p>
+                </div>
+                <div className="flex gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="h-2 w-2 rounded-full bg-accent animate-bounce"
+                      style={{ animationDelay: `${i * 0.15}s` }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Doubt pause overlay */}
+            {doubtPrompt && state === 'playing' && (
+              <DoubtPause
+                prompt={doubtPrompt}
+                onContinue={() => schedulerRef.current?.continue()}
+                onSubmit={submitDoubt}
               />
+            )}
+
+            {/* Quick check overlay */}
+            {quickCheckQuestions && state === 'playing' && (
+              <QuickCheckOverlay
+                questions={quickCheckQuestions}
+                onDone={() => schedulerRef.current?.continueAfterQuickCheck()}
+              />
+            )}
+
+            {/* Lesson end screen */}
+            {state === 'ended' && (
+              <LessonEnd
+                chapterId={chapterId}
+                sectionId={sectionId}
+                nextSectionId={nextSectionId}
+                nextSectionTitle={nextSectionTitle}
+              />
+            )}
+
+            {/* Audio blocked banner */}
+            {audioBlocked && state !== 'ended' && (
+              <button
+                type="button"
+                onClick={enableAudio}
+                className="absolute right-4 top-4 z-40 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white shadow-md hover:bg-accentHover"
+              >
+                🔊 Enable sound
+              </button>
+            )}
+
+            {/* Thinking indicator */}
+            {answering && !doubtPrompt && (
+              <div className="pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-full bg-ink/85 px-4 py-1.5 text-sm font-medium text-white shadow-md">
+                💭 Aryan Sir is thinking…
+              </div>
+            )}
+          </div>
+
+          {/* Caption bar (below whiteboard) */}
+          {caption && state === 'playing' && (
+            <div className="mt-2 flex items-start justify-between gap-3 rounded-xl border-2 border-accent/30 bg-surface px-5 py-3.5 shadow-sm">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <span className="mt-0.5 shrink-0 text-base">🎙️</span>
+                <p className="text-sm leading-relaxed text-ink font-medium">{caption}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => schedulerRef.current?.skip()}
+                className="shrink-0 rounded-full border border-line px-3 py-1 text-xs text-inkMuted hover:bg-accentMuted hover:text-accent transition-colors"
+              >
+                Skip ▸
+              </button>
             </div>
           )}
         </div>
 
-        {/* Caption bar */}
-        {caption && state === 'playing' && (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-5 py-3 shadow-sm">
-            <p className="text-sm leading-relaxed text-ink">{caption}</p>
-            <button
-              type="button"
-              onClick={() => schedulerRef.current?.skip()}
-              className="shrink-0 rounded-full px-3 py-1 text-xs text-inkMuted hover:bg-accentMuted hover:text-accent"
-            >
-              Skip ▸
-            </button>
-          </div>
-        )}
+        {/* ── Teacher side panel ── */}
+        {showControls && (
+          <div className="hidden w-64 shrink-0 flex-col gap-3 lg:flex">
 
-        {/* ── Bottom control bar — shown during lesson ── */}
-        {(state === 'playing' || state === 'connecting') && (
-          <div className="mt-3 flex items-center gap-2">
-            {/* Ask Aryan Sir input */}
-            <div className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2.5 shadow-sm focus-within:border-accent">
-              <span className="text-sm shrink-0">💬</span>
-              <input
-                ref={askInputRef}
-                type="text"
-                value={askText}
-                onChange={(e) => setAskText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleUserAsk(); }
-                }}
-                placeholder="Ask Aryan Sir anything…"
-                disabled={answering || state === 'connecting'}
-                className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-inkMuted/60 disabled:opacity-50"
-              />
-              {askText.trim() && (
-                <button
-                  type="button"
-                  onClick={() => void handleUserAsk()}
-                  disabled={answering}
-                  className="shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white hover:bg-accentHover disabled:opacity-50"
-                >
-                  Ask →
-                </button>
+            {/* Avatar card */}
+            <div className="rounded-2xl border border-line bg-surface p-4 shadow-sm">
+              {/* HeyGen avatar (hidden until ready) */}
+              <div className={avatarReady ? 'block' : 'hidden'}>
+                <div className="overflow-hidden rounded-xl border border-line bg-ink aspect-square">
+                  <HeyGenAvatar
+                    ref={avatarRef}
+                    className="h-full w-full"
+                    onReady={() => {
+                      avatarReadyRef.current = true;
+                      setAvatarReady(true);
+                    }}
+                    onFailed={() => {
+                      avatarReadyRef.current = false;
+                      setAvatarReady(false);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* SiriAvatar fallback (shown when HeyGen not ready) */}
+              {!avatarReady && (
+                <div className="flex items-center justify-center h-40 overflow-hidden rounded-xl border border-line bg-ink/90">
+                  <SiriAvatar speaking={speaking} className="h-36 w-36" />
+                </div>
               )}
-              {answering && (
-                <span className="shrink-0 text-xs text-accent animate-pulse">Answering…</span>
+
+              {/* Teacher state */}
+              <div className="mt-3 flex items-center gap-2">
+                <div className={`h-2 w-2 shrink-0 rounded-full ${
+                  state === 'connecting' ? 'bg-amber-400 animate-pulse' :
+                  answering ? 'bg-blue-400 animate-pulse' :
+                  paused ? 'bg-gray-400' :
+                  speaking ? 'bg-green-400 animate-pulse' :
+                  'bg-green-300'
+                }`} />
+                <p className="text-xs font-medium text-inkMuted leading-tight">
+                  {teacherStateLabel()}
+                </p>
+              </div>
+
+              {/* Caption in panel (when speaking) */}
+              {caption && !paused && (
+                <p className="mt-2.5 text-xs leading-relaxed text-ink/80 line-clamp-4 italic">
+                  "{caption}"
+                </p>
+              )}
+
+              {/* Paused indicator */}
+              {paused && (
+                <div className="mt-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                  <p className="text-xs font-medium text-amber-800">Lesson paused. Press Resume to continue.</p>
+                </div>
               )}
             </div>
 
-            {/* Notes toggle */}
+            {/* Time remaining */}
             {state === 'playing' && (
-              <button
-                type="button"
-                onClick={() => setNotesOpen((o) => !o)}
-                title="Toggle notes"
-                className={`rounded-xl border px-3 py-2.5 text-sm transition-colors ${notesOpen ? 'border-accent bg-accentMuted text-accent' : 'border-line bg-surface text-inkMuted hover:border-accent hover:text-accent'}`}
-              >
-                📝
-              </button>
+              <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-sm">
+                <p className="text-xs text-inkMuted font-medium">Time remaining</p>
+                <p className="mt-0.5 text-xl font-bold text-ink tabular-nums">{timeLabel}</p>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-accentMuted">
+                  <div
+                    className="h-full rounded-full bg-accent transition-all duration-1000"
+                    style={{ width: `${Math.min(100, (elapsedSeconds / totalSeconds) * 100)}%` }}
+                  />
+                </div>
+              </div>
             )}
 
-            {/* Stop lesson */}
+            {/* Ask / Interrupt panel */}
             {state === 'playing' && (
-              <button
-                type="button"
-                onClick={handleStop}
-                title="Stop lesson"
-                className="rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-inkMuted hover:border-danger hover:text-danger transition-colors"
-              >
-                ⏹
-              </button>
+              <div className="rounded-2xl border-2 border-accent/20 bg-surface p-4 shadow-sm">
+                <p className="text-xs font-bold uppercase tracking-wide text-accent mb-2">
+                  💬 Ask Aryan Sir
+                </p>
+                <p className="text-xs text-inkMuted mb-3">
+                  Interrupt at any time — type a question and press Ask.
+                </p>
+                <textarea
+                  value={askText}
+                  onChange={(e) => setAskText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      void handleUserAsk();
+                    }
+                  }}
+                  placeholder="Kuch samajh nahi aaya? Ask here…"
+                  rows={3}
+                  disabled={answering || state !== 'playing'}
+                  className="block w-full resize-none rounded-xl border border-line bg-canvas px-3 py-2 text-sm text-ink outline-none placeholder:text-inkMuted/50 focus:border-accent disabled:opacity-50"
+                />
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleUserAsk()}
+                    disabled={!askText.trim() || answering}
+                    className="flex-1 rounded-lg bg-accent py-2 text-xs font-bold text-white hover:bg-accentHover disabled:opacity-40 transition-colors"
+                  >
+                    {answering ? 'Asking…' : 'Ask →'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleInterrupt}
+                    title="Interrupt current narration"
+                    className="rounded-lg border border-line px-3 py-2 text-xs text-inkMuted hover:border-accent hover:text-accent transition-colors"
+                  >
+                    🖐 Stop
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[10px] text-inkMuted/60">⌘+Enter to send</p>
+              </div>
             )}
-          </div>
-        )}
 
-        {/* Error */}
-        {state === 'error' && error && (
-          <div className="mt-4 rounded-md border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-            {error}
-            <button
-              type="button"
-              onClick={() => { setState('prep'); setError(null); }}
-              className="ml-4 underline"
-            >
-              Go back
-            </button>
+            {/* Notes panel */}
+            {state === 'playing' && notesOpen && (
+              <div className="rounded-2xl border border-line bg-surface shadow-sm">
+                <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+                  <p className="text-xs font-bold text-inkMuted">📝 My Notes</p>
+                  <button
+                    type="button"
+                    onClick={() => setNotesOpen(false)}
+                    className="text-sm text-inkMuted hover:text-ink"
+                  >×</button>
+                </div>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Key points, formulas, questions…"
+                  rows={5}
+                  className="block w-full resize-none rounded-b-2xl bg-transparent px-4 py-3 text-sm text-ink outline-none placeholder:text-inkMuted/50"
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* ── Bottom controls bar ── */}
+      {showControls && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+
+          {/* PAUSE / RESUME — prominent */}
+          {state === 'playing' && (
+            <button
+              type="button"
+              onClick={handlePauseResume}
+              className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold shadow-sm transition-colors ${
+                paused
+                  ? 'bg-accent text-white hover:bg-accentHover'
+                  : 'border-2 border-accent bg-accentMuted text-accent hover:bg-accent hover:text-white'
+              }`}
+            >
+              {paused ? '▶ Resume' : '⏸ Pause'}
+            </button>
+          )}
+
+          {/* Mobile ask input (shown on small screens where side panel is hidden) */}
+          <div className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2.5 shadow-sm focus-within:border-accent lg:hidden">
+            <span className="text-sm shrink-0">💬</span>
+            <input
+              ref={askInputRef}
+              type="text"
+              value={askText}
+              onChange={(e) => setAskText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleUserAsk(); }
+              }}
+              placeholder="Ask Aryan Sir anything…"
+              disabled={answering || state === 'connecting'}
+              className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-inkMuted/60 disabled:opacity-50"
+            />
+            {askText.trim() && (
+              <button
+                type="button"
+                onClick={() => void handleUserAsk()}
+                disabled={answering}
+                className="shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-bold text-white hover:bg-accentHover disabled:opacity-50"
+              >
+                Ask →
+              </button>
+            )}
+            {answering && (
+              <span className="shrink-0 text-xs text-accent animate-pulse">Answering…</span>
+            )}
+          </div>
+
+          {/* Time remaining on mobile */}
+          {state === 'playing' && (
+            <div className="hidden items-center gap-1 rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-inkMuted sm:flex lg:hidden">
+              <span>⏱</span>
+              <span className="tabular-nums font-medium">{timeLabel}</span>
+            </div>
+          )}
+
+          {/* Notes toggle */}
+          {state === 'playing' && (
+            <button
+              type="button"
+              onClick={() => setNotesOpen((o) => !o)}
+              title="Toggle notes"
+              className={`rounded-xl border px-3 py-2.5 text-sm transition-colors ${
+                notesOpen
+                  ? 'border-accent bg-accentMuted text-accent'
+                  : 'border-line bg-surface text-inkMuted hover:border-accent hover:text-accent'
+              }`}
+            >
+              📝
+            </button>
+          )}
+
+          {/* Stop lesson */}
+          {state === 'playing' && (
+            <button
+              type="button"
+              onClick={handleStop}
+              title="Stop lesson"
+              className="rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-inkMuted hover:border-danger hover:text-danger transition-colors"
+            >
+              ⏹
+            </button>
+          )}
+
+          {/* Time remaining (desktop, outside side panel at small viewport) */}
+          {state === 'playing' && (
+            <span className="ml-auto text-xs font-medium text-inkMuted tabular-nums hidden xl:block">
+              ⏱ {timeLabel}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Mobile notes panel (below controls on small screens) */}
+      {notesOpen && state === 'playing' && (
+        <div className="mt-3 rounded-xl border border-line bg-surface shadow-sm lg:hidden">
+          <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+            <p className="text-xs font-semibold text-inkMuted">📝 Notes (auto-saved)</p>
+            <button type="button" onClick={() => setNotesOpen(false)} className="text-inkMuted hover:text-ink text-base leading-none">×</button>
+          </div>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Key points, formulas, questions…"
+            rows={5}
+            className="block w-full resize-none rounded-b-xl bg-transparent px-4 py-3 text-sm text-ink outline-none placeholder:text-inkMuted/50"
+          />
+        </div>
+      )}
+
+      {/* Error */}
+      {state === 'error' && error && (
+        <div className="mt-4 rounded-md border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+          {error}
+          <button
+            type="button"
+            onClick={() => { setState('prep'); setError(null); }}
+            className="ml-4 underline"
+          >
+            Go back
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -504,25 +776,25 @@ function DoubtPause({
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-canvas/85 backdrop-blur">
       <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-8 shadow-xl mx-4">
-        <p className="text-center text-lg font-semibold text-ink">{prompt}</p>
-        <p className="mt-1 text-center text-sm text-inkMuted">
-          Type your question below, or continue if you&apos;re good.
-        </p>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-10 w-10 shrink-0 flex items-center justify-center rounded-full bg-accentMuted text-xl">🖐</div>
+          <div>
+            <p className="font-semibold text-ink">Aryan Sir is checking in</p>
+            <p className="text-sm text-inkMuted">{prompt}</p>
+          </div>
+        </div>
         <textarea
           ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void handleSubmit();
-            }
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void handleSubmit(); }
           }}
-          placeholder="What's unclear? Ask anything…"
+          placeholder="Kuch samajh nahi aaya? Ask anything…"
           rows={3}
           maxLength={1000}
           disabled={submitting}
-          className="mt-4 block w-full resize-none rounded-xl border border-line bg-surface p-3 text-sm text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accentMuted disabled:opacity-50"
+          className="block w-full resize-none rounded-xl border border-line bg-surface p-3 text-sm text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accentMuted disabled:opacity-50"
         />
         <p className="mt-1.5 text-xs text-inkMuted">⌘ + Enter to submit</p>
         <div className="mt-4 flex items-center justify-between gap-4">
@@ -532,7 +804,7 @@ function DoubtPause({
             disabled={submitting}
             className="text-sm text-inkMuted hover:text-ink disabled:opacity-50"
           >
-            Continue lesson
+            Continue lesson →
           </button>
           <Button onClick={handleSubmit} disabled={!text.trim() || submitting}>
             {submitting ? 'Asking…' : 'Ask Aryan Sir'}
@@ -566,7 +838,6 @@ function LessonEnd({
         <p className="mt-2 text-sm text-inkMuted">+100 XP · Flashcards ready · Progress saved</p>
 
         <div className="mt-6 flex flex-col gap-2.5">
-          {/* Primary: next section or practice */}
           {nextSectionId ? (
             <Link href={`/learn/${nextSectionId}`} className="block">
               <Button className="w-full">
@@ -579,26 +850,20 @@ function LessonEnd({
             </Link>
           )}
 
-          {/* Secondary actions */}
-          <div className="flex items-center justify-center gap-4">
-            <Link
-              href={`/practice/${sectionId}`}
-              className="text-xs text-inkMuted hover:text-accent transition-colors"
-            >
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Link href={`/learn/${sectionId}`} className="text-xs text-inkMuted hover:text-accent transition-colors">
+              Replay lesson
+            </Link>
+            <span className="text-inkMuted">·</span>
+            <Link href={`/practice/${sectionId}`} className="text-xs text-inkMuted hover:text-accent transition-colors">
               Practice
             </Link>
             <span className="text-inkMuted">·</span>
-            <Link
-              href={`/chapter/${chapterId}`}
-              className="text-xs text-inkMuted hover:text-accent transition-colors"
-            >
+            <Link href={`/chapter/${chapterId}`} className="text-xs text-inkMuted hover:text-accent transition-colors">
               Chapter roadmap
             </Link>
             <span className="text-inkMuted">·</span>
-            <Link
-              href="/flashcards"
-              className="text-xs text-inkMuted hover:text-accent transition-colors"
-            >
+            <Link href="/flashcards" className="text-xs text-inkMuted hover:text-accent transition-colors">
               Flash cards
             </Link>
           </div>
@@ -629,7 +894,7 @@ function QuickCheckOverlay({
   function scoreMessage() {
     if (score === questions.length) return 'Perfect score — you got every one!';
     if (score >= questions.length - 1) return 'Almost perfect — one small slip.';
-    return 'A couple to revisit — the explanations below will help.';
+    return 'A couple to revisit — explanations below will help.';
   }
 
   return (

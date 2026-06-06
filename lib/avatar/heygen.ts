@@ -16,9 +16,23 @@ export interface HeyGenSession {
  *
  * Docs: https://docs.liveavatar.com/api-reference/sessions/create-session-token
  */
-export async function createHeyGenSession(avatarId: string): Promise<HeyGenSession> {
+export async function createHeyGenSession(
+  avatarId: string,
+  voiceId?: string,
+): Promise<HeyGenSession> {
   const apiKey = env.HEYGEN_API_KEY;
   if (!apiKey) throw new Error('HEYGEN_API_KEY not set');
+
+  const body: Record<string, unknown> = {
+    mode: 'LITE',
+    avatar_id: avatarId,
+    is_sandbox: false,
+    max_session_duration: 1800, // 30 min cap per session
+  };
+  // Pass a specific voice (e.g. an Indian English voice) when provided.
+  if (voiceId) {
+    body.voice = { voice_id: voiceId };
+  }
 
   const res = await fetch(`${LIVEAVATAR_BASE}/v1/sessions/token`, {
     method: 'POST',
@@ -26,12 +40,7 @@ export async function createHeyGenSession(avatarId: string): Promise<HeyGenSessi
       'X-API-KEY': apiKey,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      mode: 'LITE',
-      avatar_id: avatarId,
-      is_sandbox: false,
-      max_session_duration: 1800, // 30 min cap per session
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
