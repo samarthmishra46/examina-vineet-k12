@@ -12,6 +12,28 @@ import { HeyGenAvatar, type HeyGenAvatarHandle } from './HeyGenAvatar';
 import { SiriAvatar } from './SiriAvatar';
 import { parseNdjsonStream } from './parse-ndjson';
 
+// SpeechRecognition isn't in TS lib.dom yet — define minimal types locally
+interface SpeechRecognitionEvent extends Event {
+  readonly results: { readonly length: number; [i: number]: { readonly length: number; [j: number]: { transcript: string } } };
+}
+interface SpeechRecognitionInstance {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onstart: (() => void) | null;
+  onresult: ((e: SpeechRecognitionEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+function getSpeechRecognitionCtor(): (new () => SpeechRecognitionInstance) | null {
+  if (typeof window === 'undefined') return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition ?? null;
+}
+
 interface Props {
   sectionId: string;
   chapterId: string;
@@ -50,6 +72,11 @@ export function LessonPlayer({
   const avatarRef = useRef<HeyGenAvatarHandle>(null);
   const avatarReadyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Prefetch: start /api/teach while user reads the prep card to eliminate start latency
+  const prefetchRef = useRef<Promise<Response> | null>(null);
+  const prefetchCtrlRef = useRef<AbortController | null>(null);
+  // Voice input
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const [caption, setCaption] = useState<string | null>(null);
   const [doubtPrompt, setDoubtPrompt] = useState<string | null>(null);
@@ -65,6 +92,8 @@ export function LessonPlayer({
   const [paused, setPaused] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [avatarReady, setAvatarReady] = useState(false);
+  const [avatarStatus, setAvatarStatus] = useState<'idle' | 'connecting' | 'ready' | 'failed'>('idle');
+  const [isListening, setIsListening] = useState(false);
   const askInputRef = useRef<HTMLInputElement>(null);
 
   // Load/auto-save notes
@@ -76,6 +105,23 @@ export function LessonPlayer({
     const t = setTimeout(() => localStorage.setItem(`notes_${sectionId}`, notes), 500);
     return () => clearTimeout(t);
   }, [notes, sectionId]);
+
+  // Prefetch the lesson stream while user reads the prep card so start is instant
+  useEffect(() => {
+    const ctrl = new AbortController();
+    prefetchCtrlRef.current = ctrl;
+    prefetchRef.current = fetch('/api/teach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sectionId }),
+      signal: ctrl.signal,
+    });
+    return () => {
+      ctrl.abort();
+      prefetchCtrlRef.current = null;
+      prefetchRef.current = null;
+    };
+  }, [sectionId]);
 
   // Elapsed time timer — only ticks when playing and not paused
   useEffect(() => {
@@ -150,14 +196,35 @@ export function LessonPlayer({
     setPaused(false);
     setElapsedSeconds(0);
 
+    // Claim prefetched promise (started on prep screen mount). On failure fall back to fresh fetch.
+    const prefetchPending = prefetchRef.current;
+    prefetchRef.current = null;
+    prefetchCtrlRef.current = null;
+
     void (async () => {
       try {
-        const res = await fetch('/api/teach', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sectionId }),
-          signal: controller.signal,
-        });
+        let res: Response;
+        if (prefetchPending) {
+          try {
+            res = await prefetchPending;
+          } catch {
+            // Prefetch was aborted or failed — start a fresh request
+            if (controller.signal.aborted) return;
+            res = await fetch('/api/teach', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sectionId }),
+              signal: controller.signal,
+            });
+          }
+        } else {
+          res = await fetch('/api/teach', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sectionId }),
+            signal: controller.signal,
+          });
+        }
         if (!res.ok || !res.body) {
           const errBody = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(errBody.error ?? `Stream failed (${res.status})`);
@@ -269,19 +336,52 @@ export function LessonPlayer({
     }
   }
 
-  function handleInterrupt() {
-    if (!answering) schedulerRef.current?.skip();
-    else avatarRef.current?.interrupt();
+  // Stop the current narration / avatar speech without ending the lesson
+  function handleSkip() {
+    schedulerRef.current?.skip();
+    avatarRef.current?.interrupt();
+  }
+
+  function startVoiceInput() {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) return;
+
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new Ctor();
+    recognition.lang = 'en-IN';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (e) => {
+      const transcript = e.results[0]?.[0]?.transcript ?? '';
+      setAskText(transcript);
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onend = () => { setIsListening(false); recognitionRef.current = null; };
+    recognition.onerror = () => { setIsListening(false); recognitionRef.current = null; };
+    recognition.start();
+    recognitionRef.current = recognition;
   }
 
   // Full reset — used by both "Replay lesson" and error recovery.
   // Cleans up all in-progress state so the prep screen can start fresh.
   function handleReplay() {
+    prefetchCtrlRef.current?.abort();
+    prefetchCtrlRef.current = null;
+    prefetchRef.current = null;
     controllerRef.current?.abort();
     schedulerRef.current?.abort();
     void audioContextRef.current?.close().catch(() => undefined);
     audioContextRef.current = null;
-    if (typeof window !== 'undefined') window.speechSynthesis.cancel();
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
     wbRef.current?.clear();
     schedulerRef.current = null;
     controllerRef.current = null;
@@ -291,8 +391,10 @@ export function LessonPlayer({
     setEquations([]);
     setAnswering(false);
     setPaused(false);
+    setIsListening(false);
     setElapsedSeconds(0);
     setAvatarReady(false);
+    setAvatarStatus('idle');
     avatarReadyRef.current = false;
     setState('prep');
   }
@@ -301,11 +403,17 @@ export function LessonPlayer({
     controllerRef.current?.abort();
     schedulerRef.current?.abort();
     void audioContextRef.current?.close().catch(() => undefined);
-    if (typeof window !== 'undefined') window.speechSynthesis.cancel();
     setState('ended');
   }
 
   const showControls = state === 'playing' || state === 'connecting';
+
+  // Track when avatar starts connecting (mounts with showControls)
+  useEffect(() => {
+    if (showControls && avatarStatus === 'idle') {
+      setAvatarStatus('connecting');
+    }
+  }, [showControls, avatarStatus]);
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-4 lg:px-6 lg:py-6">
@@ -490,17 +598,19 @@ export function LessonPlayer({
 
           {/* Caption bar (below whiteboard) */}
           {caption && state === 'playing' && (
-            <div className="mt-2 flex items-start justify-between gap-3 rounded-xl border-2 border-accent/30 bg-surface px-5 py-3.5 shadow-sm">
+            <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border-2 border-accent/30 bg-surface px-4 py-3 shadow-sm">
               <div className="flex items-start gap-2.5 min-w-0">
                 <span className="mt-0.5 shrink-0 text-base">🎙️</span>
-                <p className="text-sm leading-relaxed text-ink font-medium">{caption}</p>
+                <p className="text-sm leading-relaxed text-ink font-medium line-clamp-2">{caption}</p>
               </div>
               <button
                 type="button"
-                onClick={() => schedulerRef.current?.skip()}
-                className="shrink-0 rounded-full border border-line px-3 py-1 text-xs text-inkMuted hover:bg-accentMuted hover:text-accent transition-colors"
+                onClick={handleSkip}
+                title="Stop speaking"
+                className="shrink-0 flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-medium text-inkMuted hover:border-danger hover:bg-danger/5 hover:text-danger transition-colors"
               >
-                Skip ▸
+                <span>🔇</span>
+                <span className="hidden sm:inline">Stop</span>
               </button>
             </div>
           )}
@@ -521,20 +631,39 @@ export function LessonPlayer({
                     onReady={() => {
                       avatarReadyRef.current = true;
                       setAvatarReady(true);
+                      setAvatarStatus('ready');
                     }}
                     onFailed={() => {
                       avatarReadyRef.current = false;
                       setAvatarReady(false);
+                      setAvatarStatus('failed');
                     }}
                   />
                 </div>
               </div>
 
-              {/* SiriAvatar fallback (shown when HeyGen not ready) */}
+              {/* SiriAvatar fallback (shown when HeyGen not ready or failed) */}
               {!avatarReady && (
                 <div className="flex items-center justify-center h-40 overflow-hidden rounded-xl border border-line bg-ink/90">
                   <SiriAvatar speaking={speaking} className="h-36 w-36" />
                 </div>
+              )}
+
+              {/* Avatar connection status */}
+              {avatarStatus === 'connecting' && (
+                <p className="mt-1 text-[10px] text-center text-amber-600 animate-pulse">
+                  Connecting avatar…
+                </p>
+              )}
+              {avatarStatus === 'failed' && (
+                <p className="mt-1 text-[10px] text-center text-inkMuted/60">
+                  Avatar offline · AI voice active
+                </p>
+              )}
+              {avatarStatus === 'ready' && (
+                <p className="mt-1 text-[10px] text-center text-green-600">
+                  Avatar connected
+                </p>
               )}
 
               {/* Teacher state */}
@@ -586,9 +715,6 @@ export function LessonPlayer({
                 <p className="text-xs font-bold uppercase tracking-wide text-accent mb-2">
                   💬 Ask Aryan Sir
                 </p>
-                <p className="text-xs text-inkMuted mb-3">
-                  Interrupt at any time — type a question and press Ask.
-                </p>
                 <textarea
                   value={askText}
                   onChange={(e) => setAskText(e.target.value)}
@@ -598,27 +724,42 @@ export function LessonPlayer({
                       void handleUserAsk();
                     }
                   }}
-                  placeholder="Kuch samajh nahi aaya? Ask here…"
+                  placeholder="Ask anything…"
                   rows={3}
                   disabled={answering || state !== 'playing'}
                   className="block w-full resize-none rounded-xl border border-line bg-canvas px-3 py-2 text-sm text-ink outline-none placeholder:text-inkMuted/50 focus:border-accent disabled:opacity-50"
                 />
-                <div className="mt-2 flex gap-2">
+                <div className="mt-2 flex gap-1.5">
+                  {/* Microphone voice input */}
+                  {getSpeechRecognitionCtor() && (
+                    <button
+                      type="button"
+                      onClick={startVoiceInput}
+                      title={isListening ? 'Stop listening' : 'Speak your question'}
+                      className={`rounded-lg border px-2.5 py-2 text-sm transition-colors ${
+                        isListening
+                          ? 'border-red-400 bg-red-50 text-red-600 animate-pulse'
+                          : 'border-line text-inkMuted hover:border-accent hover:text-accent'
+                      }`}
+                    >
+                      {isListening ? '🔴' : '🎤'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void handleUserAsk()}
                     disabled={!askText.trim() || answering}
                     className="flex-1 rounded-lg bg-accent py-2 text-xs font-bold text-white hover:bg-accentHover disabled:opacity-40 transition-colors"
                   >
-                    {answering ? 'Asking…' : 'Ask →'}
+                    {answering ? 'Answering…' : 'Ask →'}
                   </button>
                   <button
                     type="button"
-                    onClick={handleInterrupt}
-                    title="Interrupt current narration"
-                    className="rounded-lg border border-line px-3 py-2 text-xs text-inkMuted hover:border-accent hover:text-accent transition-colors"
+                    onClick={handleSkip}
+                    title="Stop speaking"
+                    className="rounded-lg border border-line px-2.5 py-2 text-sm text-inkMuted hover:border-accent hover:text-accent transition-colors"
                   >
-                    🖐 Stop
+                    🔇
                   </button>
                 </div>
                 <p className="mt-1.5 text-[10px] text-inkMuted/60">⌘+Enter to send</p>
@@ -653,7 +794,7 @@ export function LessonPlayer({
       {showControls && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
 
-          {/* PAUSE / RESUME — prominent */}
+          {/* PAUSE / RESUME — most prominent */}
           {state === 'playing' && (
             <button
               type="button"
@@ -668,8 +809,20 @@ export function LessonPlayer({
             </button>
           )}
 
+          {/* STOP SPEAKING — stops current narration without ending lesson */}
+          {state === 'playing' && (
+            <button
+              type="button"
+              onClick={handleSkip}
+              title="Stop speaking now"
+              className="flex items-center gap-2 rounded-xl border-2 border-line bg-surface px-4 py-2.5 text-sm font-semibold text-inkMuted hover:border-danger hover:text-danger transition-colors"
+            >
+              🔇 Stop speaking
+            </button>
+          )}
+
           {/* Mobile ask input (shown on small screens where side panel is hidden) */}
-          <div className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2.5 shadow-sm focus-within:border-accent lg:hidden">
+          <div className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2.5 shadow-sm focus-within:border-accent lg:hidden min-w-0">
             <span className="text-sm shrink-0">💬</span>
             <input
               ref={askInputRef}
@@ -679,16 +832,25 @@ export function LessonPlayer({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void handleUserAsk(); }
               }}
-              placeholder="Ask Aryan Sir anything…"
+              placeholder="Ask anything…"
               disabled={answering || state === 'connecting'}
-              className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-inkMuted/60 disabled:opacity-50"
+              className="flex-1 min-w-0 bg-transparent text-sm text-ink outline-none placeholder:text-inkMuted/60 disabled:opacity-50"
             />
-            {askText.trim() && (
+            {getSpeechRecognitionCtor() && (
+              <button
+                type="button"
+                onClick={startVoiceInput}
+                title={isListening ? 'Stop listening' : 'Ask by voice'}
+                className={`shrink-0 text-base transition-colors ${isListening ? 'text-red-500 animate-pulse' : 'text-inkMuted hover:text-accent'}`}
+              >
+                {isListening ? '🔴' : '🎤'}
+              </button>
+            )}
+            {askText.trim() && !answering && (
               <button
                 type="button"
                 onClick={() => void handleUserAsk()}
-                disabled={answering}
-                className="shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-bold text-white hover:bg-accentHover disabled:opacity-50"
+                className="shrink-0 rounded-full bg-accent px-3 py-1 text-xs font-bold text-white hover:bg-accentHover"
               >
                 Ask →
               </button>
@@ -722,19 +884,19 @@ export function LessonPlayer({
             </button>
           )}
 
-          {/* Stop lesson */}
+          {/* End lesson — clearly labeled, separated from stop-speaking */}
           {state === 'playing' && (
             <button
               type="button"
               onClick={handleStop}
-              title="Stop lesson"
-              className="rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-inkMuted hover:border-danger hover:text-danger transition-colors"
+              title="End lesson"
+              className="rounded-xl border border-line bg-surface px-3 py-2.5 text-xs text-inkMuted hover:border-danger hover:text-danger transition-colors"
             >
-              ⏹
+              End lesson
             </button>
           )}
 
-          {/* Time remaining (desktop, outside side panel at small viewport) */}
+          {/* Time remaining (desktop) */}
           {state === 'playing' && (
             <span className="ml-auto text-xs font-medium text-inkMuted tabular-nums hidden xl:block">
               ⏱ {timeLabel}
@@ -818,7 +980,7 @@ function DoubtPause({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void handleSubmit(); }
           }}
-          placeholder="Kuch samajh nahi aaya? Ask anything…"
+          placeholder="Anything unclear? Ask here…"
           rows={3}
           maxLength={1000}
           disabled={submitting}

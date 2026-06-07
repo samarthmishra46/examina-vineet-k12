@@ -127,9 +127,6 @@ export class CommandScheduler {
     if (this.pausedState) return;
     this.pausedState = true;
     this.deps.audioContext?.suspend().catch(() => {});
-    if (CommandScheduler.webSpeechAvailable()) {
-      window.speechSynthesis.pause();
-    }
   }
 
   /** Resume lesson after pausePlayback(). */
@@ -137,9 +134,6 @@ export class CommandScheduler {
     if (!this.pausedState) return;
     this.pausedState = false;
     this.deps.audioContext?.resume().catch(() => {});
-    if (CommandScheduler.webSpeechAvailable()) {
-      window.speechSynthesis.resume();
-    }
     const r = this.pauseResolver;
     this.pauseResolver = null;
     r?.();
@@ -169,17 +163,13 @@ export class CommandScheduler {
 
   // ---------- ingestion ----------
 
-  private static webSpeechAvailable(): boolean {
-    return typeof window !== 'undefined' && 'speechSynthesis' in window;
-  }
-
   private async runIngestion(stream: AsyncIterable<Command>): Promise<void> {
     try {
       for await (const cmd of stream) {
         if (this.aborted) return;
         this.commandQueue.push(cmd);
-        // Only prefetch OpenAI TTS when Web Speech API is not available
-        if (cmd.type === 'narrate' && this.deps.audioContext && !CommandScheduler.webSpeechAvailable()) {
+        // Prefetch OpenAI TTS for every narrate so audio is ready by playback time
+        if (cmd.type === 'narrate' && this.deps.audioContext) {
           this.audioCache.set(cmd.id, this.fetchAudio(cmd.text));
         }
         this.notifyCommandAvailable();
@@ -311,12 +301,7 @@ export class CommandScheduler {
       }
     }
 
-    // Web Speech API — zero latency, runs on-device, no API cost
-    if (CommandScheduler.webSpeechAvailable()) {
-      return this.playViaWebSpeech(cmd.text);
-    }
-
-    // OpenAI TTS fallback (when Web Speech API unavailable)
+    // OpenAI TTS via Web Audio API
     const ctx = this.deps.audioContext;
     if (!ctx) {
       return this.waitReadingTime(cmd.text);
@@ -390,48 +375,6 @@ export class CommandScheduler {
         () => finish(),
         (err) => finish(err),
       );
-    });
-  }
-
-  private playViaWebSpeech(text: string): Promise<void> {
-    if (this.aborted) return Promise.resolve();
-
-    // Cancel any leftover speech
-    window.speechSynthesis.cancel();
-
-    return new Promise<void>((resolve) => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
-
-      // Pick best available English voice
-      const voices = window.speechSynthesis.getVoices();
-      const preferred =
-        voices.find((v) => v.lang === 'en-US' && v.localService) ??
-        voices.find((v) => v.lang === 'en-US') ??
-        voices.find((v) => v.lang.startsWith('en')) ??
-        null;
-      if (preferred) utterance.voice = preferred;
-
-      let resolved = false;
-      const finish = () => {
-        if (resolved) return;
-        resolved = true;
-        this.skipResolver = null;
-        try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
-        resolve();
-      };
-
-      utterance.onend = finish;
-      utterance.onerror = finish;
-      this.skipResolver = finish;
-
-      window.speechSynthesis.speak(utterance);
-
-      // Watchdog: if speech hasn't started within 2s, fall through silently
-      const watchdog = setTimeout(() => { if (!resolved) finish(); }, 2000);
-      utterance.onstart = () => clearTimeout(watchdog);
     });
   }
 

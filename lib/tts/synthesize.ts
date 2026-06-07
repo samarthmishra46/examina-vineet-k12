@@ -18,7 +18,7 @@ function getClient(): OpenAI {
 
 export type TtsVoice = 'alloy' | 'echo' | 'fable' | 'nova' | 'onyx' | 'shimmer';
 
-export const DEFAULT_VOICE: TtsVoice = 'nova';
+export const DEFAULT_VOICE: TtsVoice = 'shimmer';
 
 /**
  * Synthesize a single sentence to mp3 via OpenAI tts-1.
