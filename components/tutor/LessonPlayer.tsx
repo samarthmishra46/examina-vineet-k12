@@ -596,21 +596,30 @@ export function LessonPlayer({
             )}
           </div>
 
-          {/* Caption bar (below whiteboard) */}
+          {/* Caption bar (below whiteboard) — always has Pause + Stop so controls are reachable */}
           {caption && state === 'playing' && (
-            <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border-2 border-accent/30 bg-surface px-4 py-3 shadow-sm">
-              <div className="flex items-start gap-2.5 min-w-0">
-                <span className="mt-0.5 shrink-0 text-base">🎙️</span>
-                <p className="text-sm leading-relaxed text-ink font-medium line-clamp-2">{caption}</p>
-              </div>
+            <div className="mt-2 flex items-center gap-2 rounded-xl border-2 border-accent/30 bg-surface px-3 py-2.5 shadow-sm">
+              <span className="shrink-0 text-base">🎙️</span>
+              <p className="flex-1 min-w-0 text-sm leading-relaxed text-ink font-medium line-clamp-1">{caption}</p>
+              {/* Pause/Resume — always visible inline with caption */}
+              <button
+                type="button"
+                onClick={handlePauseResume}
+                className={`shrink-0 flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                  paused
+                    ? 'border-accent bg-accent text-white'
+                    : 'border-accent bg-accentMuted text-accent hover:bg-accent hover:text-white'
+                }`}
+              >
+                {paused ? '▶' : '⏸'}
+              </button>
               <button
                 type="button"
                 onClick={handleSkip}
                 title="Stop speaking"
-                className="shrink-0 flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-medium text-inkMuted hover:border-danger hover:bg-danger/5 hover:text-danger transition-colors"
+                className="shrink-0 flex items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-inkMuted hover:border-danger hover:bg-danger/5 hover:text-danger transition-colors"
               >
-                <span>🔇</span>
-                <span className="hidden sm:inline">Stop</span>
+                🔇
               </button>
             </div>
           )}
@@ -790,9 +799,9 @@ export function LessonPlayer({
         )}
       </div>
 
-      {/* ── Bottom controls bar ── */}
+      {/* ── Bottom controls bar — sticky so it's always visible even with tall whiteboard ── */}
       {showControls && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="sticky bottom-0 z-40 mt-3 flex flex-wrap items-center gap-2 border-t border-line bg-canvas/95 py-2 backdrop-blur-sm -mx-4 px-4 lg:-mx-6 lg:px-6">
 
           {/* PAUSE / RESUME — most prominent */}
           {state === 'playing' && (
