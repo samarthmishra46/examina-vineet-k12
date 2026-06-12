@@ -16,6 +16,9 @@ const MIN_EXTRACTED_CHARS = 500;
 const CreateChapterMetaSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(500),
+  ncertClass: z.string().max(30).optional().default(''),
+  ncertSubject: z.string().max(50).optional().default(''),
+  examWeightPct: z.coerce.number().min(0).max(100).optional().default(0),
 });
 
 /**
@@ -34,6 +37,9 @@ export async function createChapter(formData: FormData): Promise<void> {
   const meta = CreateChapterMetaSchema.parse({
     title: typeof rawTitle === 'string' ? rawTitle.trim() : '',
     description: typeof rawDescription === 'string' ? rawDescription.trim() : '',
+    ncertClass: formData.get('ncertClass') ?? '',
+    ncertSubject: formData.get('ncertSubject') ?? '',
+    examWeightPct: formData.get('examWeightPct') ?? 0,
   });
 
   let sourceContent = '';
@@ -84,6 +90,9 @@ export async function createChapter(formData: FormData): Promise<void> {
     sourceUrl,
     status: 'draft',
     createdBy: new Types.ObjectId(admin.id),
+    ncertClass: meta.ncertClass,
+    ncertSubject: meta.ncertSubject,
+    examWeightPct: meta.examWeightPct,
   });
 
   try {
@@ -219,4 +228,75 @@ export async function deleteChapter(chapterId: string): Promise<void> {
   }
   revalidatePath('/admin/chapters');
   redirect('/admin/chapters');
+}
+
+/**
+ * Batch action: accepts a single PDF with shared NCERT metadata.
+ * Called in a loop from the batch-upload UI — each call creates one chapter.
+ * The title is auto-derived from the PDF filename; admin can edit later.
+ */
+export async function createChaptersFromPdfs(formData: FormData): Promise<void> {
+  const admin = await requireAdmin();
+  await connectMongoose();
+
+  const file = formData.get('file');
+  if (!(file instanceof File) || file.size === 0) throw new Error('No PDF file.');
+  if (file.size > MAX_PDF_BYTES) throw new Error('PDF exceeds 10 MB limit.');
+  if (!file.name.toLowerCase().endsWith('.pdf')) throw new Error('Must be a .pdf');
+
+  const ncertClass = typeof formData.get('ncertClass') === 'string' ? (formData.get('ncertClass') as string) : '';
+  const ncertSubject = typeof formData.get('ncertSubject') === 'string' ? (formData.get('ncertSubject') as string) : '';
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const sourceContent = await extractTextFromPdf(buffer);
+
+  if (sourceContent.length < MIN_EXTRACTED_CHARS) {
+    throw new Error(`"${file.name}": extracted text too short — may be a scanned PDF.`);
+  }
+
+  // Derive a clean title from filename: "leph101.pdf" → "leph101"
+  const rawName = file.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
+  // Ask Claude to derive the real chapter title from the extracted content
+  // For now, use the filename as-is; admin can rename in the editor.
+  const title = rawName || file.name;
+  const description = `${ncertClass ? ncertClass + ' ' : ''}${ncertSubject ? ncertSubject + ' — ' : ''}Chapter from ${file.name}`;
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const blob = await put(`chapters/${Date.now()}-${safeName}`, buffer, {
+    access: 'public',
+    contentType: 'application/pdf',
+  });
+
+  const chapter = await Chapter.create({
+    title,
+    description,
+    sourceType: 'pdf',
+    sourceContent,
+    sourceUrl: blob.url,
+    status: 'draft',
+    createdBy: new Types.ObjectId(admin.id),
+    ncertClass,
+    ncertSubject,
+    examWeightPct: 0,
+  });
+
+  try {
+    const sections = await generateRoadmap(sourceContent);
+    await Section.insertMany(
+      sections.map((s) => ({
+        chapterId: chapter._id,
+        order: s.order,
+        title: s.title,
+        description: s.description,
+        learningObjectives: s.learningObjectives,
+        estimatedMinutes: s.estimatedMinutes,
+      })),
+    );
+  } catch (err) {
+    await Chapter.deleteOne({ _id: chapter._id });
+    try { await del(blob.url); } catch { /* ignore */ }
+    throw err;
+  }
+
+  revalidatePath('/admin/chapters');
 }

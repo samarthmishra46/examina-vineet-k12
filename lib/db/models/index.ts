@@ -9,4 +9,5 @@ export { StudentProfile, type StudentProfileAttrs } from './student-profile';
 export { Flashcard, type FlashcardAttrs } from './flashcard';
 export { FlashcardProgress, type FlashcardProgressAttrs } from './flashcard-progress';
 export { CheatSheet, type CheatSheetAttrs } from './cheatsheet';
+export { Subscription, type SubscriptionAttrs } from './subscription';
 export { connectMongoose } from '../mongoose';

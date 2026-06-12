@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import { redirect } from 'next/navigation';
 import { StudentShell } from '@/components/student/StudentShell';
 import { requireAuth } from '@/lib/auth/helpers';
-import { StudentProfile, connectMongoose } from '@/lib/db/models';
+import { Subscription, StudentProfile, connectMongoose } from '@/lib/db/models';
 
 export default async function StudentLayout({
   children,
@@ -11,19 +11,26 @@ export default async function StudentLayout({
   children: React.ReactNode;
   params?: Record<string, string>;
 }) {
-  void params; // unused but Next.js passes it
+  void params;
   const user = await requireAuth();
   await connectMongoose();
 
-  const profile = await StudentProfile.findOne({
-    userId: new Types.ObjectId(user.id),
-  })
-    .select('_id')
-    .lean();
+  const userId = new Types.ObjectId(user.id);
 
-  if (!profile) {
-    redirect('/onboarding');
-  }
+  // ── Subscription gate ────────────────────────────────────────────────────────
+  const subscription = await Subscription.findOne({ userId }).lean();
+  const now = new Date();
+  const isSubscribed =
+    subscription &&
+    (subscription.status === 'active' ||
+      subscription.status === 'authenticated' ||
+      (subscription.trialEndDate && subscription.trialEndDate > now));
+
+  if (!isSubscribed) redirect('/subscribe');
+
+  // ── Profile gate (onboarding) ────────────────────────────────────────────────
+  const profile = await StudentProfile.findOne({ userId }).select('_id').lean();
+  if (!profile) redirect('/onboarding');
 
   return <StudentShell>{children}</StudentShell>;
 }
