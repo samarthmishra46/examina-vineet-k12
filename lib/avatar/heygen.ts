@@ -27,7 +27,7 @@ export async function createHeyGenSession(
     mode: 'LITE',
     avatar_id: avatarId,
     is_sandbox: false,
-    max_session_duration: 1800, // 30 min cap per session
+    max_session_duration: 120, // HeyGen enforces 120s max per session token
   };
   // Pass a specific voice (e.g. an Indian English voice) when provided.
   if (voiceId) {
