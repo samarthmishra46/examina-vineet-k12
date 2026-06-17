@@ -34,20 +34,24 @@ export async function POST() {
 
   const razorpay = getRazorpay();
 
+  // Razorpay implements a free trial via `start_at`: the first charge is
+  // deferred until that timestamp, so the customer is not billed during the
+  // trial. `trial_period` is not a valid subscription field.
+  const trialEndDate = new Date();
+  trialEndDate.setDate(trialEndDate.getDate() + TRIAL_DAYS);
+  const startAt = Math.floor(trialEndDate.getTime() / 1000);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const subscription = await (razorpay.subscriptions.create as any)({
     plan_id: env.RAZORPAY_PLAN_ID,
     total_count: 12,
-    trial_period: TRIAL_DAYS,
+    start_at: startAt,
     customer_notify: 1,
     notes: {
       userId: user.id,
       userEmail: user.email ?? '',
     },
   });
-
-  const trialEndDate = new Date();
-  trialEndDate.setDate(trialEndDate.getDate() + TRIAL_DAYS);
 
   await Subscription.create({
     userId,

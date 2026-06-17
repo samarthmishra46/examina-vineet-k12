@@ -12,26 +12,15 @@ import { HeyGenAvatar, type HeyGenAvatarHandle } from './HeyGenAvatar';
 import { SiriAvatar } from './SiriAvatar';
 import { parseNdjsonStream } from './parse-ndjson';
 
-// SpeechRecognition isn't in TS lib.dom yet — define minimal types locally
-interface SpeechRecognitionEvent extends Event {
-  readonly results: { readonly length: number; [i: number]: { readonly length: number; [j: number]: { transcript: string } } };
-}
-interface SpeechRecognitionInstance {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onstart: (() => void) | null;
-  onresult: ((e: SpeechRecognitionEvent) => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-  start(): void;
-  stop(): void;
-}
-
-function getSpeechRecognitionCtor(): (new () => SpeechRecognitionInstance) | null {
-  if (typeof window === 'undefined') return null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition ?? null;
+// Voice input uses MediaRecorder + server-side Whisper (see /api/transcribe).
+// The browser's SpeechRecognition is unreliable (returns "network" on many
+// Chromium/Linux builds since its cloud backend is unavailable).
+function canRecordAudio(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    typeof window.MediaRecorder !== 'undefined' &&
+    !!navigator.mediaDevices?.getUserMedia
+  );
 }
 
 interface Props {
@@ -75,8 +64,10 @@ export function LessonPlayer({
   // Prefetch: start /api/teach while user reads the prep card to eliminate start latency
   const prefetchRef = useRef<Promise<Response> | null>(null);
   const prefetchCtrlRef = useRef<AbortController | null>(null);
-  // Voice input
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  // Voice input (MediaRecorder → /api/transcribe)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const micStreamRef = useRef<MediaStream | null>(null);
 
   const [caption, setCaption] = useState<string | null>(null);
   const [doubtPrompt, setDoubtPrompt] = useState<string | null>(null);
@@ -94,6 +85,8 @@ export function LessonPlayer({
   const [avatarReady, setAvatarReady] = useState(false);
   const [avatarStatus, setAvatarStatus] = useState<'idle' | 'connecting' | 'ready' | 'failed'>('idle');
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const askInputRef = useRef<HTMLInputElement>(null);
 
   // Load/auto-save notes
@@ -342,32 +335,84 @@ export function LessonPlayer({
     avatarRef.current?.interrupt();
   }
 
-  function startVoiceInput() {
-    const Ctor = getSpeechRecognitionCtor();
-    if (!Ctor) return;
+  // Records mic audio and sends it to /api/transcribe (Whisper). We record
+  // rather than use the browser SpeechRecognition because the latter's cloud
+  // backend is unavailable on many Chromium builds (fails with "network").
+  function stopRecording() {
+    // Triggers onstop, which uploads the audio. Stream is closed there.
+    mediaRecorderRef.current?.state === 'recording' && mediaRecorderRef.current.stop();
+  }
 
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-      setIsListening(false);
+  async function startVoiceInput() {
+    // Toggle off if already recording.
+    if (isListening) {
+      stopRecording();
+      return;
+    }
+    if (!canRecordAudio()) {
+      setVoiceError('Voice input is not supported in this browser.');
       return;
     }
 
-    const recognition = new Ctor();
-    recognition.lang = 'en-IN';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (e) => {
-      const transcript = e.results[0]?.[0]?.transcript ?? '';
-      setAskText(transcript);
-      setIsListening(false);
-      recognitionRef.current = null;
+    setVoiceError(null);
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setVoiceError('Microphone blocked. Allow mic access in your browser, then try again.');
+      return;
+    }
+
+    micStreamRef.current = stream;
+    audioChunksRef.current = [];
+    const recorder = new MediaRecorder(stream);
+    mediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data);
     };
-    recognition.onend = () => { setIsListening(false); recognitionRef.current = null; };
-    recognition.onerror = () => { setIsListening(false); recognitionRef.current = null; };
-    recognition.start();
-    recognitionRef.current = recognition;
+    recorder.onstop = async () => {
+      setIsListening(false);
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+      mediaRecorderRef.current = null;
+
+      const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+      audioChunksRef.current = [];
+      if (blob.size === 0) return;
+
+      setIsTranscribing(true);
+      try {
+        const form = new FormData();
+        const ext = (recorder.mimeType || 'audio/webm').includes('mp4') ? 'mp4' : 'webm';
+        form.append('audio', blob, `speech.${ext}`);
+        const res = await fetch('/api/transcribe', { method: 'POST', body: form });
+        if (!res.ok || !res.body) throw new Error(`status ${res.status}`);
+
+        // Stream the transcript in: append deltas to the existing prompt live.
+        const prefix = askText ? `${askText} ` : '';
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let transcript = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          transcript += decoder.decode(value, { stream: true });
+          setAskText(prefix + transcript);
+        }
+        transcript = transcript.trim();
+        if (transcript) setAskText(prefix + transcript);
+        else setVoiceError("Didn't catch that — please try again.");
+      } catch {
+        setVoiceError('Transcription failed. Please try again.');
+      } finally {
+        setIsTranscribing(false);
+      }
+    };
+
+    recorder.start();
+    setIsListening(true);
   }
 
   // Full reset — used by both "Replay lesson" and error recovery.
@@ -380,8 +425,9 @@ export function LessonPlayer({
     schedulerRef.current?.abort();
     void audioContextRef.current?.close().catch(() => undefined);
     audioContextRef.current = null;
-    recognitionRef.current?.stop();
-    recognitionRef.current = null;
+    stopRecording();
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current = null;
     wbRef.current?.clear();
     schedulerRef.current = null;
     controllerRef.current = null;
@@ -740,18 +786,19 @@ export function LessonPlayer({
                 />
                 <div className="mt-2 flex gap-1.5">
                   {/* Microphone voice input */}
-                  {getSpeechRecognitionCtor() && (
+                  {canRecordAudio() && (
                     <button
                       type="button"
-                      onClick={startVoiceInput}
+                      onClick={() => void startVoiceInput()}
+                      disabled={isTranscribing}
                       title={isListening ? 'Stop listening' : 'Speak your question'}
-                      className={`rounded-lg border px-2.5 py-2 text-sm transition-colors ${
+                      className={`rounded-lg border px-2.5 py-2 text-sm transition-colors disabled:opacity-50 ${
                         isListening
                           ? 'border-red-400 bg-red-50 text-red-600 animate-pulse'
                           : 'border-line text-inkMuted hover:border-accent hover:text-accent'
                       }`}
                     >
-                      {isListening ? '🔴' : '🎤'}
+                      {isTranscribing ? '⏳' : isListening ? '🔴' : '🎤'}
                     </button>
                   )}
                   <button
@@ -771,7 +818,17 @@ export function LessonPlayer({
                     🔇
                   </button>
                 </div>
-                <p className="mt-1.5 text-[10px] text-inkMuted/60">⌘+Enter to send</p>
+                {voiceError ? (
+                  <p className="mt-1.5 text-[10px] text-red-500">{voiceError}</p>
+                ) : (
+                  <p className="mt-1.5 text-[10px] text-inkMuted/60">
+                    {isTranscribing
+                      ? 'Transcribing…'
+                      : isListening
+                        ? 'Listening… tap 🔴 to stop'
+                        : '⌘+Enter to send'}
+                  </p>
+                )}
               </div>
             )}
 
@@ -845,14 +902,15 @@ export function LessonPlayer({
               disabled={answering || state === 'connecting'}
               className="flex-1 min-w-0 bg-transparent text-sm text-ink outline-none placeholder:text-inkMuted/60 disabled:opacity-50"
             />
-            {getSpeechRecognitionCtor() && (
+            {canRecordAudio() && (
               <button
                 type="button"
-                onClick={startVoiceInput}
+                onClick={() => void startVoiceInput()}
+                disabled={isTranscribing}
                 title={isListening ? 'Stop listening' : 'Ask by voice'}
-                className={`shrink-0 text-base transition-colors ${isListening ? 'text-red-500 animate-pulse' : 'text-inkMuted hover:text-accent'}`}
+                className={`shrink-0 text-base transition-colors disabled:opacity-50 ${isListening ? 'text-red-500 animate-pulse' : 'text-inkMuted hover:text-accent'}`}
               >
-                {isListening ? '🔴' : '🎤'}
+                {isTranscribing ? '⏳' : isListening ? '🔴' : '🎤'}
               </button>
             )}
             {askText.trim() && !answering && (
