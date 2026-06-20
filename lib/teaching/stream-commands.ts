@@ -6,19 +6,37 @@ import { CommandSchema, type Command } from './command-schema';
  * soon as a full NDJSON line arrives. Shared by lesson and doubt generation.
  * Malformed lines are logged and skipped so one bad command doesn't abort
  * the stream.
+ *
+ * When `systemPrompt` is provided it is sent as a cached system message
+ * (Anthropic prompt caching, ~5-min TTL). This eliminates re-processing the
+ * 8 KB constant persona + rules on every request.
  */
 export async function* streamCommands(
-  prompt: string,
-  options: { maxTokens?: number; model?: string } = {},
+  userContent: string,
+  options: { maxTokens?: number; model?: string; systemPrompt?: string } = {},
 ): AsyncGenerator<Command> {
   const client = getAnthropicClient();
 
-  const stream = await client.messages.create({
-    model: options.model ?? 'claude-sonnet-4-6',
-    max_tokens: options.maxTokens ?? 8192,
-    stream: true,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  const system = options.systemPrompt
+    ? ([
+        {
+          type: 'text' as const,
+          text: options.systemPrompt,
+          cache_control: { type: 'ephemeral' as const },
+        },
+      ] as Parameters<typeof client.messages.create>[0]['system'])
+    : undefined;
+
+  const stream = await client.messages.create(
+    {
+      model: options.model ?? 'claude-sonnet-4-6',
+      max_tokens: options.maxTokens ?? 8192,
+      stream: true,
+      ...(system && { system }),
+      messages: [{ role: 'user', content: userContent }],
+    },
+    { headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' } },
+  );
 
   let buffer = '';
 

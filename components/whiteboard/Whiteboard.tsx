@@ -5,8 +5,10 @@ import '@excalidraw/excalidraw/index.css';
 import dynamic from 'next/dynamic';
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useRef,
+  useState,
   type ForwardedRef,
 } from 'react';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
@@ -20,23 +22,35 @@ const Excalidraw = dynamic(
 );
 
 const HIGHLIGHT_DEFAULT = '#FCD34D';
+// Coordinate space Claude draws in — all prompts assume this width
+const CANVAS_WIDTH = 1200;
+const CANVAS_HEIGHT = 680;
 
 export interface WhiteboardHandle {
   apply(cmd: Command): void;
   clear(): void;
 }
 
-interface WhiteboardProps {
-  width?: number;
-  height?: number;
-}
-
 function WhiteboardImpl(
-  { width = 1200, height = 680 }: WhiteboardProps,
+  _props: object,
   ref: ForwardedRef<WhiteboardHandle>,
 ) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const idMapRef = useRef<Map<string, string>>(new Map());
+
+  // Scale so the 1200px coordinate space always fits the container width.
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setScale(el.offsetWidth / CANVAS_WIDTH);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useImperativeHandle(ref, () => ({
     apply(cmd) {
@@ -64,8 +78,7 @@ function WhiteboardImpl(
       const existing = api.getSceneElements();
       api.updateScene({ elements: [...existing, ...newElements] });
 
-      // Always scroll to keep new content visible — on all screen sizes.
-      // We pan (no zoom change) so the experience stays stable.
+      // Scroll to keep new content in view. No zoom change — scale is locked.
       api.scrollToContent(newElements, { animate: false });
     },
     clear() {
@@ -75,33 +88,50 @@ function WhiteboardImpl(
   }));
 
   return (
+    // Outer container: visible area. Height shrinks with scale so nothing is clipped.
     <div
+      ref={containerRef}
       className="overflow-hidden rounded-xl bg-[#FBFAF7]"
-      style={{ width: '100%', height }}
+      style={{ width: '100%', height: CANVAS_HEIGHT * scale }}
     >
-      <Excalidraw
-        excalidrawAPI={(api) => { apiRef.current = api; }}
-        viewModeEnabled
-        zenModeEnabled
-        UIOptions={{
-          canvasActions: {
-            saveToActiveFile: false,
-            loadScene: false,
-            export: false,
-            toggleTheme: false,
-            clearCanvas: false,
-            changeViewBackgroundColor: false,
-          },
+      {/* Inner div: always 1200×680 in actual pixels, scaled down via CSS. */}
+      <div
+        style={{
+          width: CANVAS_WIDTH,
+          height: CANVAS_HEIGHT,
+          transform: `scale(${scale})`,
+          transformOrigin: 'top left',
         }}
-        initialData={{
-          appState: {
-            viewBackgroundColor: '#FBFAF7',
-            zenModeEnabled: true,
-          },
-          elements: [],
-          scrollToContent: false,
-        }}
-      />
+      >
+        <Excalidraw
+          excalidrawAPI={(api) => { apiRef.current = api; }}
+          viewModeEnabled
+          zenModeEnabled
+          UIOptions={{
+            canvasActions: {
+              saveToActiveFile: false,
+              loadScene: false,
+              export: false,
+              toggleTheme: false,
+              clearCanvas: false,
+              changeViewBackgroundColor: false,
+            },
+          }}
+          initialData={{
+            appState: {
+              viewBackgroundColor: '#FBFAF7',
+              zenModeEnabled: true,
+              // Lock zoom at 1:1 — scaling is handled by CSS transform above
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              zoom: { value: 1 as any },
+              scrollX: 0,
+              scrollY: 0,
+            },
+            elements: [],
+            scrollToContent: false,
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -122,5 +152,5 @@ function applyHighlight(
   api.updateScene({ elements: next });
 }
 
-export const Whiteboard = forwardRef<WhiteboardHandle, WhiteboardProps>(WhiteboardImpl);
+export const Whiteboard = forwardRef<WhiteboardHandle, object>(WhiteboardImpl);
 Whiteboard.displayName = 'Whiteboard';

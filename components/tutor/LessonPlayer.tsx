@@ -504,8 +504,9 @@ export function LessonPlayer({
 
         {/* Whiteboard column */}
         <div className="relative min-w-0 flex-1">
+          {/* Slim progress bar — only shows during connecting, non-blocking */}
           {state === 'connecting' && (
-            <div className="absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden rounded-full">
+            <div className="absolute inset-x-0 top-0 z-20 h-1 overflow-hidden rounded-full">
               <div className="h-full w-3/4 animate-pulse rounded-full bg-accent" />
             </div>
           )}
@@ -573,25 +574,15 @@ export function LessonPlayer({
               </div>
             )}
 
-            {/* Connecting overlay */}
+            {/* Connecting: small non-blocking banner at top — whiteboard stays visible */}
             {state === 'connecting' && (
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-5 bg-canvas/75 backdrop-blur-sm">
-                <div className="h-20 w-20 overflow-hidden rounded-2xl border border-line bg-ink/90 shadow-lg">
-                  <SiriAvatar speaking={false} className="h-full w-full" />
-                </div>
-                <div className="space-y-1 text-center">
-                  <p className="text-sm font-semibold text-ink">Aryan Sir is preparing your lesson…</p>
-                  <p className="text-xs text-inkMuted">Drawing the board, setting up explanations</p>
-                </div>
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-2 bg-accent/90 py-2 text-white backdrop-blur-sm">
                 <div className="flex gap-1">
                   {[0, 1, 2].map((i) => (
-                    <div
-                      key={i}
-                      className="h-2 w-2 rounded-full bg-accent animate-bounce"
-                      style={{ animationDelay: `${i * 0.15}s` }}
-                    />
+                    <div key={i} className="h-1.5 w-1.5 rounded-full bg-white animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
                   ))}
                 </div>
+                <span className="text-xs font-semibold tracking-wide">Aryan Sir is preparing…</span>
               </div>
             )}
 
@@ -640,35 +631,30 @@ export function LessonPlayer({
                 💭 Aryan Sir is thinking…
               </div>
             )}
-          </div>
 
-          {/* Caption bar (below whiteboard) — always has Pause + Stop so controls are reachable */}
-          {caption && state === 'playing' && (
-            <div className="mt-2 flex items-center gap-2 rounded-xl border-2 border-accent/30 bg-surface px-3 py-2.5 shadow-sm">
-              <span className="shrink-0 text-base">🎙️</span>
-              <p className="flex-1 min-w-0 text-sm leading-relaxed text-ink font-medium line-clamp-1">{caption}</p>
-              {/* Pause/Resume — always visible inline with caption */}
-              <button
-                type="button"
-                onClick={handlePauseResume}
-                className={`shrink-0 flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
-                  paused
-                    ? 'border-accent bg-accent text-white'
-                    : 'border-accent bg-accentMuted text-accent hover:bg-accent hover:text-white'
-                }`}
-              >
-                {paused ? '▶' : '⏸'}
-              </button>
-              <button
-                type="button"
-                onClick={handleSkip}
-                title="Stop speaking"
-                className="shrink-0 flex items-center gap-1 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-inkMuted hover:border-danger hover:bg-danger/5 hover:text-danger transition-colors"
-              >
-                🔇
-              </button>
-            </div>
-          )}
+            {/* Caption overlay — fixed at bottom of whiteboard, always visible */}
+            {caption && (state === 'playing' || state === 'connecting') && (
+              <div className="absolute bottom-0 inset-x-0 z-30 flex items-center gap-3 bg-black/80 backdrop-blur-sm px-4 py-3">
+                <span className="shrink-0 text-sm text-white/70">🎙</span>
+                <p className="flex-1 min-w-0 text-sm leading-snug text-white font-medium">{caption}</p>
+                <button
+                  type="button"
+                  onClick={handlePauseResume}
+                  className="shrink-0 rounded-full bg-white/20 hover:bg-white/30 px-3 py-1 text-xs font-semibold text-white transition-colors"
+                >
+                  {paused ? '▶' : '⏸'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSkip}
+                  title="Stop speaking"
+                  className="shrink-0 rounded-full bg-white/20 hover:bg-red-500/70 px-3 py-1 text-xs font-semibold text-white transition-colors"
+                >
+                  🔇
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ── Teacher side panel ── */}

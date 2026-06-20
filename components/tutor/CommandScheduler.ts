@@ -68,14 +68,26 @@ export class CommandScheduler {
 
   /**
    * Resolve the current pause_for_doubts AND process a doubt-answer stream
-   * inline before the main lesson resumes. The main playback loop is parked
-   * on waitForContinue(); we run each doubt command through the same handle()
-   * pipeline (so draws appear, narrates play with audio, skip still works),
-   * then resolve the wait so the main lesson seamlessly continues.
+   * inline before the main lesson resumes.
+   *
+   * Perf fix: collect ALL commands first while immediately kicking off TTS
+   * fetches in parallel. By the time the first narrate starts playing, its
+   * audio is already loading (or done). Without this, TTS fetches were serial
+   * — each narrate waited 8–15 s before the next one even started fetching.
    */
   async continueWithDoubt(stream: AsyncIterable<Command>): Promise<void> {
+    const commands: Command[] = [];
     try {
+      // Collect + pre-fetch TTS concurrently with Haiku generation
       for await (const cmd of stream) {
+        if (this.aborted) break;
+        commands.push(cmd);
+        if (cmd.type === 'narrate' && this.deps.audioContext) {
+          this.audioCache.set(cmd.id, this.fetchAudio(cmd.text));
+        }
+      }
+      // Play in order — audio is already loading
+      for (const cmd of commands) {
         if (this.aborted) break;
         await this.handle(cmd);
       }
