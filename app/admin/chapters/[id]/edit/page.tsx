@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { isValidObjectId } from 'mongoose';
 import { notFound } from 'next/navigation';
-import { Chapter, Section, connectMongoose } from '@/lib/db/models';
+import { Chapter, Question, Section, connectMongoose } from '@/lib/db/models';
 import { RoadmapEditor, type ChapterView, type SectionView } from './RoadmapEditor';
 
 export async function generateMetadata({
@@ -27,6 +27,12 @@ export default async function EditChapterPage({ params }: { params: { id: string
   if (!chapter) notFound();
 
   const sections = await Section.find({ chapterId: chapter._id }).sort({ order: 1 }).lean();
+  const sectionIds = sections.map((s) => s._id);
+  const counts = await Question.aggregate([
+    { $match: { sectionId: { $in: sectionIds }, flagSuspended: { $ne: true } } },
+    { $group: { _id: '$sectionId', count: { $sum: 1 } } },
+  ]);
+  const countMap = new Map(counts.map((r: { _id: unknown; count: number }) => [r._id!.toString(), r.count as number]));
 
   const chapterView: ChapterView = {
     _id: chapter._id.toString(),
@@ -44,6 +50,7 @@ export default async function EditChapterPage({ params }: { params: { id: string
     description: s.description ?? '',
     learningObjectives: s.learningObjectives ?? [],
     estimatedMinutes: s.estimatedMinutes ?? 5,
+    questionCount: countMap.get(s._id.toString()) ?? 0,
   }));
 
   return <RoadmapEditor chapter={chapterView} initialSections={sectionsView} />;

@@ -29,11 +29,17 @@ export async function GET(_req: Request, { params }: { params: { chapterId: stri
     .map((s) => `${s.title}: ${(s.learningObjectives ?? []).join(', ')}`)
     .join('\n');
 
-  const cards = await generateCheatSheet({
-    chapterTitle: chapter.title,
-    chapterDescription: chapter.description ?? '',
-    sectionsText,
-  });
+  let cards: CheatCard[];
+  try {
+    cards = await generateCheatSheet({
+      chapterTitle: chapter.title,
+      chapterDescription: chapter.description ?? '',
+      sectionsText,
+    });
+  } catch (err) {
+    console.error('[cheatsheets] generation failed:', err);
+    return NextResponse.json({ error: 'Cheat sheet generation failed. Please try again.' }, { status: 502 });
+  }
 
   await CheatSheet.create({ chapterId: chapter._id, cards });
   return NextResponse.json({ cards, cached: false });

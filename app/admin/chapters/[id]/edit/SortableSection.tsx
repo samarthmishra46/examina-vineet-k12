@@ -15,11 +15,13 @@ export function SortableSection({
   onChange,
   onDelete,
   onError,
+  onGenerated,
 }: {
   section: SectionView;
   onChange: (s: SectionView) => void;
   onDelete: (id: string) => void;
   onError: (msg: string) => void;
+  onGenerated: (sectionId: string, count: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section._id,
@@ -36,7 +38,6 @@ export function SortableSection({
   const [minutes, setMinutes] = useState(section.estimatedMinutes);
   const [pending, startTransition] = useTransition();
   const [genStatus, setGenStatus] = useState<GenStatus>('idle');
-  const [genCount, setGenCount] = useState<number | null>(null);
 
   const dirty =
     title !== section.title ||
@@ -78,7 +79,7 @@ export function SortableSection({
       });
       const data = (await res.json()) as { count?: number; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Generation failed');
-      setGenCount(data.count ?? null);
+      onGenerated(section._id, data.count ?? 0);
       setGenStatus('done');
     } catch (e) {
       onError(e instanceof Error ? e.message : 'Failed to generate questions.');
@@ -219,8 +220,8 @@ export function SortableSection({
           >
             {genStatus === 'generating'
               ? 'Generating…'
-              : genStatus === 'done'
-                ? `✓ ${genCount ?? ''} questions`
+              : section.questionCount > 0
+                ? `✓ ${section.questionCount} question${section.questionCount === 1 ? '' : 's'} · regenerate`
                 : 'Gen questions'}
           </button>
           <button

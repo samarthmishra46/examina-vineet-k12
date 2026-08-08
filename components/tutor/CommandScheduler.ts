@@ -32,6 +32,9 @@ export interface SchedulerDeps {
   setEnded: () => void;
   shouldRouteAudioLocally?: () => boolean;
   sayViaAvatar?: (text: string) => Promise<void>;
+  /** Called with true the first time local TTS fails and playback falls back to
+   *  silent reading-time, and with false again once audio plays successfully. */
+  setAudioFailed?: (failed: boolean) => void;
 }
 
 const WORDS_PER_SECOND = 4;
@@ -192,17 +195,23 @@ export class CommandScheduler {
     }
   }
 
-  private async fetchAudio(text: string): Promise<AudioBuffer> {
+  private async fetchAudio(text: string, retriesLeft = 1): Promise<AudioBuffer> {
     const ctx = this.deps.audioContext;
     if (!ctx) throw new Error('no audio context');
-    const res = await fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
-    const buf = await res.arrayBuffer();
-    return ctx.decodeAudioData(buf);
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+      const buf = await res.arrayBuffer();
+      return await ctx.decodeAudioData(buf);
+    } catch (err) {
+      if (retriesLeft <= 0) throw err;
+      await new Promise((r) => setTimeout(r, 800));
+      return this.fetchAudio(text, retriesLeft - 1);
+    }
   }
 
   // ---------- playback ----------
@@ -328,8 +337,10 @@ export class CommandScheduler {
     let audioBuffer: AudioBuffer;
     try {
       audioBuffer = await audioPromise;
+      this.deps.setAudioFailed?.(false);
     } catch (err) {
       console.warn('[lesson] TTS failed, falling back to reading-time:', err);
+      this.deps.setAudioFailed?.(true);
       return this.waitReadingTime(cmd.text);
     }
 

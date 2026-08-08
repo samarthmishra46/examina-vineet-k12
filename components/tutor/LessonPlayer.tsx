@@ -40,6 +40,13 @@ interface Props {
 
 type PlayState = 'prep' | 'connecting' | 'playing' | 'ended' | 'error';
 
+// Temporarily disabled: NEXT_PUBLIC_HEYGEN_AVATAR_ID currently points to a
+// mismatched (female) avatar. Until it's repointed to a male Indian-presenting
+// avatar, skip the HeyGen connection entirely so the illustrated Aryan Sir
+// (SiriAvatar) shows consistently instead. Flip back to true once the avatar_id
+// is fixed — no other code changes needed.
+const HEYGEN_ENABLED = false;
+
 export function LessonPlayer({
   sectionId,
   chapterId,
@@ -76,6 +83,7 @@ export function LessonPlayer({
   const [state, setState] = useState<PlayState>('prep');
   const [error, setError] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [audioFailed, setAudioFailed] = useState(false);
   const [answering, setAnswering] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState('');
@@ -179,6 +187,7 @@ export function LessonPlayer({
         if (!a) return Promise.reject(new Error('avatar not mounted'));
         return a.say(text);
       },
+      setAudioFailed,
     });
     schedulerRef.current = scheduler;
 
@@ -456,7 +465,7 @@ export function LessonPlayer({
 
   // Track when avatar starts connecting (mounts with showControls)
   useEffect(() => {
-    if (showControls && avatarStatus === 'idle') {
+    if (HEYGEN_ENABLED && showControls && avatarStatus === 'idle') {
       setAvatarStatus('connecting');
     }
   }, [showControls, avatarStatus]);
@@ -625,6 +634,13 @@ export function LessonPlayer({
               </button>
             )}
 
+            {/* Voice failure banner */}
+            {audioFailed && (state === 'playing' || state === 'connecting') && (
+              <div className="pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-full bg-amber-100 border border-amber-300 px-4 py-1.5 text-xs font-medium text-amber-800 shadow-md">
+                🔇 Voice audio unavailable — reading along with captions
+              </div>
+            )}
+
             {/* Thinking indicator */}
             {answering && !doubtPrompt && (
               <div className="pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-full bg-ink/85 px-4 py-1.5 text-sm font-medium text-white shadow-md">
@@ -664,24 +680,26 @@ export function LessonPlayer({
             {/* Avatar card */}
             <div className="rounded-2xl border border-line bg-surface p-4 shadow-sm">
               {/* HeyGen avatar (hidden until ready) */}
-              <div className={avatarReady ? 'block' : 'hidden'}>
-                <div className="overflow-hidden rounded-xl border border-line bg-ink aspect-square">
-                  <HeyGenAvatar
-                    ref={avatarRef}
-                    className="h-full w-full"
-                    onReady={() => {
-                      avatarReadyRef.current = true;
-                      setAvatarReady(true);
-                      setAvatarStatus('ready');
-                    }}
-                    onFailed={() => {
-                      avatarReadyRef.current = false;
-                      setAvatarReady(false);
-                      setAvatarStatus('failed');
-                    }}
-                  />
+              {HEYGEN_ENABLED && (
+                <div className={avatarReady ? 'block' : 'hidden'}>
+                  <div className="overflow-hidden rounded-xl border border-line bg-ink aspect-square">
+                    <HeyGenAvatar
+                      ref={avatarRef}
+                      className="h-full w-full"
+                      onReady={() => {
+                        avatarReadyRef.current = true;
+                        setAvatarReady(true);
+                        setAvatarStatus('ready');
+                      }}
+                      onFailed={() => {
+                        avatarReadyRef.current = false;
+                        setAvatarReady(false);
+                        setAvatarStatus('failed');
+                      }}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* SiriAvatar fallback (shown when HeyGen not ready or failed) */}
               {!avatarReady && (

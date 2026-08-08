@@ -42,6 +42,8 @@ export function NewChapterForm() {
     }
   }
 
+  const BATCH_CONCURRENCY = 3;
+
   async function handleBatchUpload() {
     if (batchFiles.length === 0) return;
     setBatchRunning(true);
@@ -49,26 +51,38 @@ export function NewChapterForm() {
     const initial: BatchResult[] = batchFiles.map((f) => ({ name: f.name, status: 'pending' }));
     setBatchResults(initial);
 
-    for (let i = 0; i < batchFiles.length; i++) {
-      const file = batchFiles[i]!;
-      setBatchResults((prev) => prev.map((r, idx) => idx === i ? { ...r, status: 'processing' } : r));
-
+    async function processOne(index: number) {
+      const file = batchFiles[index]!;
+      setBatchResults((prev) => prev.map((r, idx) => idx === index ? { ...r, status: 'processing' } : r));
       try {
         const fd = new FormData();
         fd.set('file', file);
         fd.set('ncertClass', batchClass);
         fd.set('ncertSubject', batchSubject);
         await createChaptersFromPdfs(fd);
-        setBatchResults((prev) => prev.map((r, idx) => idx === i ? { ...r, status: 'done' } : r));
+        setBatchResults((prev) => prev.map((r, idx) => idx === index ? { ...r, status: 'done' } : r));
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed';
         if (/NEXT_REDIRECT/.test(msg)) {
-          setBatchResults((prev) => prev.map((r, idx) => idx === i ? { ...r, status: 'done' } : r));
+          setBatchResults((prev) => prev.map((r, idx) => idx === index ? { ...r, status: 'done' } : r));
         } else {
-          setBatchResults((prev) => prev.map((r, idx) => idx === i ? { ...r, status: 'error', error: msg } : r));
+          setBatchResults((prev) => prev.map((r, idx) => idx === index ? { ...r, status: 'error', error: msg } : r));
         }
       }
     }
+
+    // Process files with bounded concurrency instead of one-at-a-time —
+    // cuts a 10-chapter batch from ~10x roadmap-generation time down to ~4x.
+    let cursor = 0;
+    async function worker() {
+      while (cursor < batchFiles.length) {
+        const i = cursor++;
+        await processOne(i);
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(BATCH_CONCURRENCY, batchFiles.length) }, worker),
+    );
 
     setBatchRunning(false);
   }

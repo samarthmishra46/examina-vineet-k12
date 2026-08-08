@@ -38,6 +38,7 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
   const [state, setState] = useState<PlayState>('prep');
   const [error, setError] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [audioFailed, setAudioFailed] = useState(false);
 
   const speaking = caption !== null && state === 'playing';
 
@@ -59,6 +60,7 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
       clearEquations: () => setEquations([]),
       setEnded: () => setState('ended'),
       shouldRouteAudioLocally: () => true,
+      setAudioFailed,
     });
     schedulerRef.current = scheduler;
     const controller = new AbortController();
@@ -87,28 +89,6 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
     void audioContextRef.current?.close().catch(() => undefined);
   }, []);
 
-  if (state === 'prep') {
-    return (
-      <div className="mx-auto max-w-2xl px-6 py-12">
-        <Link href="/deepdive" className="text-sm text-inkMuted hover:text-ink">← Deep Dives</Link>
-        <div className="mt-8 rounded-2xl border border-line bg-surface p-8 shadow-sm">
-          <div className="flex items-center gap-3">
-            <SiriAvatar speaking={false} className="h-12 w-12 shrink-0" />
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-accent">🔬 Deep Dive</p>
-              <h1 className="font-display text-2xl text-ink">{sectionTitle}</h1>
-            </div>
-          </div>
-          <div className="mt-5 rounded-xl border border-line bg-canvas p-4 text-sm text-inkMuted">
-            Aryan Sir goes beyond the textbook — derivations from first principles, the history behind the formula, and why it works the way it does. Not for the exam. For real understanding.
-          </div>
-          <div className="mt-3 text-xs text-inkMuted">⏱ ~15–20 minutes</div>
-          <Button size="lg" className="mt-5" onClick={startDive}>Start Deep Dive →</Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto max-w-[1280px] px-6 py-8">
       <header className="mb-6 flex items-center justify-between gap-4">
@@ -120,6 +100,24 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
         <div className="relative overflow-hidden rounded-xl border border-line bg-surface shadow-sm">
           <Whiteboard ref={wbRef} />
           <EquationOverlay equations={equations} />
+          {state === 'prep' && (
+            <div className="absolute inset-0 z-40 flex items-start justify-center overflow-y-auto bg-canvas/95 backdrop-blur-sm p-6">
+              <div className="w-full max-w-lg rounded-2xl border border-line bg-surface p-7 shadow-lg">
+                <div className="flex items-center gap-3">
+                  <SiriAvatar speaking={false} className="h-12 w-12 shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-accent">🔬 Deep Dive</p>
+                    <h1 className="font-display text-2xl text-ink">{sectionTitle}</h1>
+                  </div>
+                </div>
+                <div className="mt-5 rounded-xl border border-line bg-canvas p-4 text-sm text-inkMuted">
+                  Aryan Sir goes beyond the textbook — derivations from first principles, the history behind the formula, and why it works the way it does. Not for the exam. For real understanding.
+                </div>
+                <div className="mt-3 text-xs text-inkMuted">⏱ ~15–20 minutes</div>
+                <Button size="lg" className="mt-5" onClick={startDive}>Start Deep Dive →</Button>
+              </div>
+            </div>
+          )}
           {state === 'connecting' && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-4 bg-canvas/70 backdrop-blur-sm">
               <SiriAvatar speaking={false} className="h-20 w-20" />
@@ -161,6 +159,11 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
             </div>
           )}
         </div>
+        {audioFailed && (state === 'playing' || state === 'connecting') && (
+          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+            🔇 Voice audio is unavailable right now — following along with captions instead.
+          </div>
+        )}
         {caption && state === 'playing' && (
           <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-5 py-3 shadow-sm">
             <p className="text-sm leading-relaxed text-ink">{caption}</p>

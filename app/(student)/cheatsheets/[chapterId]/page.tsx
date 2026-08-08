@@ -21,22 +21,44 @@ const CATEGORY_BADGE: Record<string, string> = {
   'Common Mistake': 'bg-red-100 text-red-700',
 };
 
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAYS_MS = [2000, 4000];
+
 export default function CheatSheetPage() {
   const { chapterId } = useParams<{ chapterId: string }>();
   const [cards, setCards] = useState<CheatCard[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [attempt, setAttempt] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
-    fetch(`/api/cheatsheets/${chapterId}`)
-      .then((r) => r.json())
-      .then((d: { cards: CheatCard[]; error?: string }) => {
-        if (d.error) { setError(d.error); return; }
-        setCards(d.cards);
-      })
-      .catch(() => setError('Failed to load cheat sheet.'))
-      .finally(() => setLoading(false));
-  }, [chapterId]);
+    let cancelled = false;
+
+    async function load() {
+      for (let i = 0; i < MAX_ATTEMPTS; i++) {
+        if (cancelled) return;
+        setAttempt(i + 1);
+        try {
+          const res = await fetch(`/api/cheatsheets/${chapterId}`);
+          const d = (await res.json()) as { cards: CheatCard[]; error?: string };
+          if (!res.ok || d.error) throw new Error(d.error ?? `HTTP ${res.status}`);
+          if (!cancelled) { setCards(d.cards); setError(null); }
+          return;
+        } catch (err) {
+          if (i === MAX_ATTEMPTS - 1) {
+            if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load cheat sheet.');
+            return;
+          }
+          await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[i]));
+        }
+      }
+    }
+
+    setLoading(true);
+    void load().finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [chapterId, reloadToken]);
 
   // Group by category
   const grouped = cards
@@ -63,14 +85,23 @@ export default function CheatSheetPage() {
         <div className="mt-16 text-center">
           <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-accent/20 border-t-accent" />
           <p className="mt-4 text-sm text-inkMuted">
-            Aryan Sir is generating your cheat sheet… (~20 seconds)
+            {attempt > 1
+              ? `Still working on it… retrying (attempt ${attempt}/${MAX_ATTEMPTS})`
+              : 'Aryan Sir is generating your cheat sheet… (~20 seconds)'}
           </p>
         </div>
       )}
 
       {error && (
-        <div className="mt-8 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-          {error}
+        <div className="mt-8 flex items-center justify-between gap-4 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => { setError(null); setCards(null); setReloadToken((t) => t + 1); }}
+            className="shrink-0 rounded-full border border-danger/30 px-3 py-1 text-xs font-medium hover:bg-danger/10"
+          >
+            Retry
+          </button>
         </div>
       )}
 

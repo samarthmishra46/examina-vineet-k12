@@ -40,6 +40,7 @@ export type SectionView = {
   description: string;
   learningObjectives: string[];
   estimatedMinutes: number;
+  questionCount: number;
 };
 
 export function RoadmapEditor({
@@ -56,6 +57,8 @@ export function RoadmapEditor({
   const [savingMeta, startMetaTransition] = useTransition();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [bulkGenerating, setBulkGenerating] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
 
   const metaDirty = title !== chapter.title || description !== chapter.description;
   const isPublished = chapter.status === 'published';
@@ -144,6 +147,44 @@ export function RoadmapEditor({
     setSections((prev) => prev.filter((s) => s._id !== id));
   }
 
+  function handleSectionGenerated(sectionId: string, count: number) {
+    setSections((prev) => prev.map((s) => (s._id === sectionId ? { ...s, questionCount: count } : s)));
+  }
+
+  async function handleGenerateAllMissing() {
+    const targets = sections.filter((s) => s.questionCount === 0);
+    if (targets.length === 0) return;
+    setError(null);
+    setBulkGenerating(true);
+    setBulkProgress({ done: 0, total: targets.length });
+
+    const CONCURRENCY = 3;
+    let cursor = 0;
+    let done = 0;
+    async function worker() {
+      while (cursor < targets.length) {
+        const section = targets[cursor++]!;
+        try {
+          const res = await fetch('/api/admin/questions/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sectionId: section._id }),
+          });
+          const data = (await res.json()) as { count?: number; error?: string };
+          if (!res.ok) throw new Error(data.error ?? 'Generation failed');
+          handleSectionGenerated(section._id, data.count ?? 0);
+        } catch (e) {
+          setError(`"${section.title}": ${messageFrom(e)}`);
+        } finally {
+          done += 1;
+          setBulkProgress({ done, total: targets.length });
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
+    setBulkGenerating(false);
+  }
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
       <div className="flex items-center justify-between">
@@ -207,7 +248,22 @@ export function RoadmapEditor({
       <div className="mt-12">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium tracking-wide text-inkMuted">Sections</h2>
-          <span className="text-xs text-inkMuted">{sections.length} total</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-inkMuted">{sections.length} total</span>
+            {sections.some((s) => s.questionCount === 0) && (
+              <button
+                type="button"
+                onClick={handleGenerateAllMissing}
+                disabled={bulkGenerating}
+                className="text-xs font-medium text-accent transition-colors duration-std ease-std hover:underline disabled:opacity-50"
+                title="Generate practice questions (feeds Speed Drills, Practice, and Mock Exam) for every section that has none"
+              >
+                {bulkGenerating
+                  ? `Generating… (${bulkProgress?.done ?? 0}/${bulkProgress?.total ?? 0})`
+                  : `Generate questions for ${sections.filter((s) => s.questionCount === 0).length} section(s) missing them`}
+              </button>
+            )}
+          </div>
         </div>
 
         <DndContext
@@ -225,6 +281,7 @@ export function RoadmapEditor({
                   onChange={handleSectionChanged}
                   onDelete={handleSectionDeleted}
                   onError={setError}
+                  onGenerated={handleSectionGenerated}
                 />
               ))}
             </ul>
