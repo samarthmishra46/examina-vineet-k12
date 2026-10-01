@@ -13,6 +13,7 @@ import { CommandScheduler } from '@/components/tutor/CommandScheduler';
 import { SiriAvatar } from '@/components/tutor/SiriAvatar';
 import { parseNdjsonStream } from '@/components/tutor/parse-ndjson';
 import type { QuickCheckQuestion } from '@/lib/teaching/command-schema';
+import type { NarrationLanguage } from '@/lib/teaching/prompts';
 
 interface Props {
   sectionId: string;
@@ -40,6 +41,27 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [audioFailed, setAudioFailed] = useState(false);
 
+  // Narration language + playback speed — persisted, same keys as LessonPlayer.
+  const [language, setLanguage] = useState<NarrationLanguage>('hinglish');
+  useEffect(() => {
+    const saved = localStorage.getItem('narration_language');
+    if (saved === 'hinglish' || saved === 'english') setLanguage(saved);
+  }, []);
+  function changeLanguage(next: NarrationLanguage) {
+    setLanguage(next);
+    localStorage.setItem('narration_language', next);
+  }
+  const [playbackRate, setPlaybackRateState] = useState(1);
+  useEffect(() => {
+    const saved = Number(localStorage.getItem('narration_speed'));
+    if (saved === 1 || saved === 1.5 || saved === 2) setPlaybackRateState(saved);
+  }, []);
+  function changePlaybackRate(rate: number) {
+    setPlaybackRateState(rate);
+    localStorage.setItem('narration_speed', String(rate));
+    schedulerRef.current?.setPlaybackRate(rate);
+  }
+
   const speaking = caption !== null && state === 'playing';
 
   const startDive = useCallback(() => {
@@ -61,7 +83,9 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
       setEnded: () => setState('ended'),
       shouldRouteAudioLocally: () => true,
       setAudioFailed,
+      language,
     });
+    scheduler.setPlaybackRate(playbackRate);
     schedulerRef.current = scheduler;
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -70,7 +94,7 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
       try {
         const res = await fetch('/api/deepdive', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sectionId }), signal: controller.signal,
+          body: JSON.stringify({ sectionId, language }), signal: controller.signal,
         });
         if (!res.ok || !res.body) throw new Error(`Stream failed (${res.status})`);
         setState('playing');
@@ -81,7 +105,7 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
         setState('error');
       }
     })();
-  }, [sectionId]);
+  }, [sectionId, language, playbackRate]);
 
   useEffect(() => () => {
     controllerRef.current?.abort();
@@ -114,6 +138,32 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
                   Aryan Sir goes beyond the textbook — derivations from first principles, the history behind the formula, and why it works the way it does. Not for the exam. For real understanding.
                 </div>
                 <div className="mt-3 text-xs text-inkMuted">⏱ ~15–20 minutes</div>
+
+                {/* Narration language toggle */}
+                <div className="mt-4 flex items-center justify-between rounded-xl border border-line bg-canvas px-4 py-2.5">
+                  <span className="text-xs font-medium text-inkMuted">Aryan Sir speaks in</span>
+                  <div className="inline-flex rounded-full border border-line bg-surface p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => changeLanguage('hinglish')}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                        language === 'hinglish' ? 'bg-accent text-white' : 'text-inkMuted hover:text-ink'
+                      }`}
+                    >
+                      Hinglish
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => changeLanguage('english')}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                        language === 'english' ? 'bg-accent text-white' : 'text-inkMuted hover:text-ink'
+                      }`}
+                    >
+                      English
+                    </button>
+                  </div>
+                </div>
+
                 <Button size="lg" className="mt-5" onClick={startDive}>Start Deep Dive →</Button>
               </div>
             </div>
@@ -167,7 +217,24 @@ export function DeepDivePlayer({ sectionId, chapterId, chapterTitle, sectionTitl
         {caption && state === 'playing' && (
           <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-5 py-3 shadow-sm">
             <p className="text-sm leading-relaxed text-ink">{caption}</p>
-            <button type="button" onClick={() => schedulerRef.current?.skip()} className="shrink-0 rounded-full px-3 py-1 text-xs text-inkMuted hover:bg-accentMuted hover:text-accent">Skip ▸</button>
+            <div className="flex shrink-0 items-center gap-2">
+              <div className="inline-flex items-center rounded-full border border-line bg-canvas p-0.5">
+                {[1, 1.5, 2].map((rate) => (
+                  <button
+                    key={rate}
+                    type="button"
+                    onClick={() => changePlaybackRate(rate)}
+                    title={`${rate}x speed`}
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-bold transition-colors ${
+                      playbackRate === rate ? 'bg-accent text-white' : 'text-inkMuted hover:text-ink'
+                    }`}
+                  >
+                    {rate}x
+                  </button>
+                ))}
+              </div>
+              <button type="button" onClick={() => schedulerRef.current?.skip()} className="rounded-full px-3 py-1 text-xs text-inkMuted hover:bg-accentMuted hover:text-accent">Skip ▸</button>
+            </div>
           </div>
         )}
         {state === 'error' && error && <div className="mt-4 rounded-md border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">{error}</div>}

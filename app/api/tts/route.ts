@@ -9,14 +9,13 @@ export const maxDuration = 60;
 
 const RequestSchema = z.object({
   text: z.string().min(1).max(800),
+  language: z.enum(['hinglish', 'english']).optional().default('english'),
 });
 
 /**
  * POST /api/tts
- * Body: { text }
- * Returns: audio/mpeg bytes for the given text via OpenAI tts-1 (nova voice).
- *
- * v1: no caching — every request re-synthesizes. v2 should hash-cache to Blob.
+ * Body: { text, language }
+ * Returns: audio/mpeg bytes for the given text via Sarvam bulbul:v3.
  */
 export async function POST(req: Request) {
   await requireAuth();
@@ -34,7 +33,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    const audio = await synthesizeSpeech(parsed.data.text);
+    const languageCode = parsed.data.language === 'hinglish' ? 'hi-IN' : 'en-IN';
+    const audio = await synthesizeSpeech(parsed.data.text, undefined, languageCode);
     return new Response(audio, {
       headers: {
         'Content-Type': 'audio/mpeg',

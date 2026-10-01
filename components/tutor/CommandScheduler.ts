@@ -1,6 +1,7 @@
 import type { WhiteboardHandle } from '@/components/whiteboard/Whiteboard';
 import type { Equation } from '@/components/whiteboard/EquationOverlay';
 import type { Command, NarrateCommand, QuickCheckQuestion } from '@/lib/teaching/command-schema';
+import type { NarrationLanguage } from '@/lib/teaching/prompts';
 
 /**
  * Orchestrates the lesson playback loop.
@@ -35,6 +36,8 @@ export interface SchedulerDeps {
   /** Called with true the first time local TTS fails and playback falls back to
    *  silent reading-time, and with false again once audio plays successfully. */
   setAudioFailed?: (failed: boolean) => void;
+  /** Narration language sent to /api/tts and used for the Sarvam voice. Defaults to 'english'. */
+  language?: NarrationLanguage;
 }
 
 const WORDS_PER_SECOND = 4;
@@ -58,8 +61,19 @@ export class CommandScheduler {
   // pause/resume: user-initiated lesson pause (suspends audio, holds playback between commands)
   private pausedState = false;
   private pauseResolver: (() => void) | null = null;
+  // Playback speed: 1 / 1.5 / 2x. Applied to in-flight audio live and to future
+  // reading-time fallback durations.
+  private playbackRate = 1;
 
   constructor(private deps: SchedulerDeps) {}
+
+  /** Change narration speed. Applies instantly to any audio currently playing. */
+  setPlaybackRate(rate: number): void {
+    this.playbackRate = rate;
+    if (this.currentSource) {
+      this.currentSource.playbackRate.value = rate;
+    }
+  }
 
   /**
    * Most recent narrate texts the student has heard. Used as context for
@@ -202,7 +216,7 @@ export class CommandScheduler {
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, language: this.deps.language ?? 'english' }),
       });
       if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
       const buf = await res.arrayBuffer();
@@ -349,6 +363,7 @@ export class CommandScheduler {
     return new Promise<void>((resolve) => {
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
+      source.playbackRate.value = this.playbackRate;
       source.connect(ctx.destination);
       this.currentSource = source;
 
@@ -403,7 +418,10 @@ export class CommandScheduler {
 
   private waitReadingTime(text: string): Promise<void> {
     const words = text.split(/\s+/).filter(Boolean).length;
-    const duration = Math.max(MIN_NARRATE_MS, Math.round((words / WORDS_PER_SECOND) * 1000));
+    const duration = Math.max(
+      MIN_NARRATE_MS,
+      Math.round((words / WORDS_PER_SECOND) * 1000 / this.playbackRate),
+    );
     return new Promise<void>((resolve) => {
       let resolved = false;
       const finish = () => {

@@ -7,6 +7,7 @@ import { EquationOverlay, type Equation } from '@/components/whiteboard/Equation
 import { Whiteboard, type WhiteboardHandle } from '@/components/whiteboard/Whiteboard';
 import { markSectionCompleted, markSectionStarted } from '@/lib/actions/progress';
 import type { QuickCheckQuestion } from '@/lib/teaching/command-schema';
+import type { NarrationLanguage } from '@/lib/teaching/prompts';
 import { CommandScheduler } from './CommandScheduler';
 import { HeyGenAvatar, type HeyGenAvatarHandle } from './HeyGenAvatar';
 import { SiriAvatar } from './SiriAvatar';
@@ -97,6 +98,29 @@ export function LessonPlayer({
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const askInputRef = useRef<HTMLInputElement>(null);
 
+  // Narration language — persisted across sessions, defaults to Hinglish.
+  const [language, setLanguage] = useState<NarrationLanguage>('hinglish');
+  useEffect(() => {
+    const saved = localStorage.getItem('narration_language');
+    if (saved === 'hinglish' || saved === 'english') setLanguage(saved);
+  }, []);
+  function changeLanguage(next: NarrationLanguage) {
+    setLanguage(next);
+    localStorage.setItem('narration_language', next);
+  }
+
+  // Playback speed — persisted across sessions, defaults to 1x.
+  const [playbackRate, setPlaybackRateState] = useState(1);
+  useEffect(() => {
+    const saved = Number(localStorage.getItem('narration_speed'));
+    if (saved === 1 || saved === 1.5 || saved === 2) setPlaybackRateState(saved);
+  }, []);
+  function changePlaybackRate(rate: number) {
+    setPlaybackRateState(rate);
+    localStorage.setItem('narration_speed', String(rate));
+    schedulerRef.current?.setPlaybackRate(rate);
+  }
+
   // Load/auto-save notes
   useEffect(() => {
     const saved = localStorage.getItem(`notes_${sectionId}`);
@@ -107,14 +131,15 @@ export function LessonPlayer({
     return () => clearTimeout(t);
   }, [notes, sectionId]);
 
-  // Prefetch the lesson stream while user reads the prep card so start is instant
+  // Prefetch the lesson stream while user reads the prep card so start is instant.
+  // Re-fetches if the student changes the language toggle before starting.
   useEffect(() => {
     const ctrl = new AbortController();
     prefetchCtrlRef.current = ctrl;
     prefetchRef.current = fetch('/api/teach', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sectionId }),
+      body: JSON.stringify({ sectionId, language }),
       signal: ctrl.signal,
     });
     return () => {
@@ -122,7 +147,7 @@ export function LessonPlayer({
       prefetchCtrlRef.current = null;
       prefetchRef.current = null;
     };
-  }, [sectionId]);
+  }, [sectionId, language]);
 
   // Elapsed time timer — only ticks when playing and not paused
   useEffect(() => {
@@ -188,7 +213,9 @@ export function LessonPlayer({
         return a.say(text);
       },
       setAudioFailed,
+      language,
     });
+    scheduler.setPlaybackRate(playbackRate);
     schedulerRef.current = scheduler;
 
     const controller = new AbortController();
@@ -215,7 +242,7 @@ export function LessonPlayer({
             res = await fetch('/api/teach', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sectionId }),
+              body: JSON.stringify({ sectionId, language }),
               signal: controller.signal,
             });
           }
@@ -223,7 +250,7 @@ export function LessonPlayer({
           res = await fetch('/api/teach', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sectionId }),
+            body: JSON.stringify({ sectionId, language }),
             signal: controller.signal,
           });
         }
@@ -239,7 +266,7 @@ export function LessonPlayer({
         setState('error');
       }
     })();
-  }, [sectionId]);
+  }, [sectionId, language, playbackRate]);
 
   // Cleanup
   useEffect(() => {
@@ -296,6 +323,7 @@ export function LessonPlayer({
           sectionId,
           doubt: doubtText,
           recentNarrations: scheduler.getNarrateHistory().slice(-4),
+          language,
         }),
       });
       if (!res.ok || !res.body) {
@@ -326,6 +354,7 @@ export function LessonPlayer({
           sectionId,
           doubt: text,
           recentNarrations: scheduler.getNarrateHistory().slice(-4),
+          language,
         }),
       });
       if (!res.ok || !res.body) throw new Error('Ask failed');
@@ -576,6 +605,32 @@ export function LessonPlayer({
                     <span>·</span>
                     <span>Ask any time</span>
                   </div>
+
+                  {/* Narration language toggle */}
+                  <div className="mt-4 flex items-center justify-between rounded-xl border border-line bg-canvas px-4 py-2.5">
+                    <span className="text-xs font-medium text-inkMuted">Aryan Sir speaks in</span>
+                    <div className="inline-flex rounded-full border border-line bg-surface p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => changeLanguage('hinglish')}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          language === 'hinglish' ? 'bg-accent text-white' : 'text-inkMuted hover:text-ink'
+                        }`}
+                      >
+                        Hinglish
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => changeLanguage('english')}
+                        className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          language === 'english' ? 'bg-accent text-white' : 'text-inkMuted hover:text-ink'
+                        }`}
+                      >
+                        English
+                      </button>
+                    </div>
+                  </div>
+
                   <Button size="lg" className="mt-4 w-full" onClick={startLesson}>
                     Start lesson with Aryan Sir →
                   </Button>
@@ -889,6 +944,36 @@ export function LessonPlayer({
             >
               🔇 Stop speaking
             </button>
+          )}
+
+          {/* PLAYBACK SPEED */}
+          {state === 'playing' && (
+            <div className="inline-flex items-center rounded-xl border border-line bg-surface p-1">
+              {[1, 1.5, 2].map((rate) => (
+                <button
+                  key={rate}
+                  type="button"
+                  onClick={() => changePlaybackRate(rate)}
+                  title={`${rate}x speed`}
+                  className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition-colors ${
+                    playbackRate === rate ? 'bg-accent text-white' : 'text-inkMuted hover:text-ink'
+                  }`}
+                >
+                  {rate}x
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* SKIP TO NEXT — jump straight to the next section without finishing this one */}
+          {(state === 'playing' || state === 'connecting') && nextSectionId && (
+            <Link
+              href={`/learn/${nextSectionId}`}
+              title={nextSectionTitle ? `Skip to ${nextSectionTitle}` : 'Skip to next section'}
+              className="flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-2.5 text-xs font-semibold text-inkMuted hover:border-accent hover:text-accent transition-colors"
+            >
+              Skip to next ⏭
+            </Link>
           )}
 
           {/* Mobile ask input (shown on small screens where side panel is hidden) */}

@@ -10,7 +10,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-const RequestSchema = z.object({ sectionId: z.string().min(1) });
+const RequestSchema = z.object({
+  sectionId: z.string().min(1),
+  language: z.enum(['hinglish', 'english']).optional().default('english'),
+});
 
 export async function POST(req: Request) {
   await requireAuth();
@@ -19,7 +22,7 @@ export async function POST(req: Request) {
   const parsed = RequestSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
 
-  const { sectionId } = parsed.data;
+  const { sectionId, language } = parsed.data;
   if (!isValidObjectId(sectionId)) return NextResponse.json({ error: 'Bad id' }, { status: 400 });
 
   await connectMongoose();
@@ -38,7 +41,7 @@ export async function POST(req: Request) {
     sectionTitle: section.title,
     sectionDescription: section.description ?? '',
     learningObjectives: section.learningObjectives ?? [],
-  });
+  }, language);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({

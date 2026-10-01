@@ -13,6 +13,7 @@ const RequestSchema = z.object({
   sectionId: z.string().min(1),
   doubt: z.string().min(1).max(1000),
   recentNarrations: z.array(z.string().max(500)).max(20),
+  language: z.enum(['hinglish', 'english']).optional().default('english'),
 });
 
 export async function POST(req: Request) {
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
-  const { sectionId, doubt, recentNarrations } = parsed.data;
+  const { sectionId, doubt, recentNarrations, language } = parsed.data;
 
   if (!isValidObjectId(sectionId)) {
     return NextResponse.json({ error: 'Invalid section id' }, { status: 400 });
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
           learningObjectives: section.learningObjectives ?? [],
           recentNarrations,
           doubt,
-        })) {
+        }, language)) {
           controller.enqueue(encoder.encode(JSON.stringify(cmd) + '\n'));
         }
       } catch (err) {

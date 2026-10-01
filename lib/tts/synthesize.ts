@@ -16,9 +16,13 @@ export type TtsVoice =
   | 'rahul' | 'aditya' | 'vijay' | 'shubh' | 'dev' | 'amit' | 'rohan'
   | 'ritu' | 'priya' | 'neha' | 'pooja' | 'simran' | 'kavya';
 
+export type TtsLanguageCode = 'hi-IN' | 'en-IN';
+
 // rahul: warm, confident, coaching-teacher cadence — chosen for Aryan Sir after
-// listening comparison against aditya/vijay (2026-10-01).
+// listening comparison against aditya/vijay (2026-10-01). Same speaker works
+// for both language codes — Sarvam's voices aren't language-locked.
 export const DEFAULT_VOICE: TtsVoice = 'rahul';
+export const DEFAULT_LANGUAGE_CODE: TtsLanguageCode = 'hi-IN';
 
 // L1: in-memory per serverless instance (survives warm re-invocations on Fluid Compute)
 const memCache = new Map<string, ArrayBuffer>();
@@ -39,10 +43,11 @@ const memCache = new Map<string, ArrayBuffer>();
 export async function synthesizeSpeech(
   text: string,
   voice: TtsVoice = DEFAULT_VOICE,
+  languageCode: TtsLanguageCode = DEFAULT_LANGUAGE_CODE,
 ): Promise<ArrayBuffer> {
   const cacheKey = crypto
     .createHash('sha1')
-    .update(`sarvam:${voice}:${text}`)
+    .update(`sarvam:${languageCode}:${voice}:${text}`)
     .digest('hex');
 
   // L1: in-memory
@@ -68,7 +73,7 @@ export async function synthesizeSpeech(
   // Generate via Sarvam bulbul:v3
   const response = await getClient().textToSpeech.convert({
     text,
-    language_code: 'hi-IN',
+    language_code: languageCode,
     speaker: voice,
     model: 'bulbul:v3',
     output_audio_codec: 'mp3',
