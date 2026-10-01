@@ -57,7 +57,7 @@ export default function AdminGuidePage() {
           </Step>
 
           <Step n={3} title="Generate practice questions (feeds Speed Drills + Mock Exam)">
-            <p>Same edit page, each section has a <strong>&quot;Gen questions&quot;</strong> button, or use <strong>&quot;Generate questions for N sections missing them&quot;</strong> at the top of the Sections list to batch it for the whole chapter. This calls Claude to write 5–15 MCQs per section.</p>
+            <p>Same edit page, each section has a <strong>&quot;Gen questions&quot;</strong> button, or use <strong>&quot;Generate questions for N sections missing them&quot;</strong> at the top of the Sections list to batch it for the whole chapter. This calls Claude to write ~6 MCQs per section.</p>
             <p>This one step is what populates <strong>Speed Drills</strong>, the regular <strong>Practice</strong> mode, and <strong>Mock Exam Mode</strong> — they all read from the same question pool. A section with 0 questions shows &quot;No questions yet&quot; and is unclickable on <code>/drills</code>.</p>
           </Step>
 

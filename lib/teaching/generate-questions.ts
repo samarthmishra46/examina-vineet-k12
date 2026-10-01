@@ -12,8 +12,8 @@ const questionsTool: Anthropic.Tool = {
     properties: {
       questions: {
         type: 'array',
-        minItems: 5,
-        maxItems: 15,
+        minItems: 4,
+        maxItems: 8,
         items: {
           type: 'object',
           required: [
@@ -47,7 +47,7 @@ export async function generateQuestions(params: QuestionPromptParams): Promise<G
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
+    max_tokens: 4096,
     tools: [questionsTool],
     tool_choice: { type: 'tool', name: 'submit_questions' },
     messages: [{ role: 'user', content: QUESTION_GENERATION_PROMPT(params) }],

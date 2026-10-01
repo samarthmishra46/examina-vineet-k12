@@ -343,15 +343,15 @@ ${p.sectionDescription}
 Learning objectives:
 ${p.learningObjectives.map((o, i) => `${i + 1}. ${o}`).join('\n')}
 
-Generate exactly 10 practice questions — 3 easy (difficulty 1), 4 medium (difficulty 2), 3 hard (difficulty 3).
+Generate exactly 6 practice questions — 2 easy (difficulty 1), 2 medium (difficulty 2), 2 hard (difficulty 3).
 
-Call submit_questions with all 10 questions. Each question must have:
+Call submit_questions with all 6 questions. Each question must have:
 
 - text: Complete, clear question. Board-exam style. No ambiguity.
 - options: Exactly 4 options. All must be plausible. Wrong options must be common mistakes, not obviously wrong.
 - correctIndex: 0, 1, 2, or 3 — which option is correct.
 - difficulty: 1 (easy — recall or single step), 2 (medium — 2–3 steps), 3 (hard — multi-step or analysis).
-- solution: Full worked solution, 2–4 steps. Show all working. Not just the answer.
+- solution: Full worked solution, 2–3 concise steps. Show the key working, not an essay.
 - conceptTags: 1–3 snake_case identifiers of the specific concept tested, e.g. "quadratic_discriminant_conditions".
 - commonMistakeTags: 1–2 tags describing the most likely errors, e.g. "sign_error", "formula_inverted", "misread_asks_for_sum".
 - timeExpectedSeconds: 30–60 for easy, 60–90 for medium, 90–150 for hard.

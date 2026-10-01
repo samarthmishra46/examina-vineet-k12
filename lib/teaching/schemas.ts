@@ -27,7 +27,7 @@ export const GeneratedQuestionSchema = z.object({
 export type GeneratedQuestion = z.infer<typeof GeneratedQuestionSchema>;
 
 export const GeneratedQuestionsSchema = z.object({
-  questions: z.array(GeneratedQuestionSchema).min(5).max(15),
+  questions: z.array(GeneratedQuestionSchema).min(4).max(8),
 });
 
 export const DiagnosisSchema = z.object({
