@@ -32,31 +32,36 @@ export async function POST(req: Request) {
   const chapter = await Chapter.findById(section.chapterId).lean();
   if (!chapter) return NextResponse.json({ error: 'Chapter not found' }, { status: 404 });
 
-  const questions = await generateQuestions({
-    chapterTitle: chapter.title,
-    sectionTitle: section.title,
-    sectionDescription: section.description ?? '',
-    learningObjectives: section.learningObjectives ?? [],
-  });
+  try {
+    const questions = await generateQuestions({
+      chapterTitle: chapter.title,
+      sectionTitle: section.title,
+      sectionDescription: section.description ?? '',
+      learningObjectives: section.learningObjectives ?? [],
+    });
 
-  // Wipe any existing questions for this section before inserting new ones.
-  await Question.deleteMany({ sectionId: section._id });
+    // Wipe any existing questions for this section before inserting new ones.
+    await Question.deleteMany({ sectionId: section._id });
 
-  const docs = questions.map((q) => ({
-    sectionId: section._id,
-    chapterId: section.chapterId,
-    text: q.text,
-    type: 'mcq' as const,
-    difficulty: q.difficulty,
-    options: q.options,
-    correctIndex: q.correctIndex,
-    solution: q.solution,
-    conceptTags: q.conceptTags,
-    commonMistakeTags: q.commonMistakeTags,
-    timeExpectedSeconds: q.timeExpectedSeconds,
-  }));
+    const docs = questions.map((q) => ({
+      sectionId: section._id,
+      chapterId: section.chapterId,
+      text: q.text,
+      type: 'mcq' as const,
+      difficulty: q.difficulty,
+      options: q.options,
+      correctIndex: q.correctIndex,
+      solution: q.solution,
+      conceptTags: q.conceptTags,
+      commonMistakeTags: q.commonMistakeTags,
+      timeExpectedSeconds: q.timeExpectedSeconds,
+    }));
 
-  await Question.insertMany(docs);
+    await Question.insertMany(docs);
 
-  return NextResponse.json({ count: docs.length });
+    return NextResponse.json({ count: docs.length });
+  } catch (err) {
+    console.error('[admin/questions/generate] failed:', err);
+    return NextResponse.json({ error: 'Question generation failed. Please try again.' }, { status: 502 });
+  }
 }

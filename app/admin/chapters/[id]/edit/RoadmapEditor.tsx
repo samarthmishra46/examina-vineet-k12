@@ -151,6 +151,23 @@ export function RoadmapEditor({
     setSections((prev) => prev.map((s) => (s._id === sectionId ? { ...s, questionCount: count } : s)));
   }
 
+  async function generateOneWithRetry(sectionId: string, retriesLeft = 2): Promise<{ count?: number; error?: string }> {
+    try {
+      const res = await fetch('/api/admin/questions/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sectionId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { count?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      return data;
+    } catch (e) {
+      if (retriesLeft <= 0) throw e;
+      await new Promise((r) => setTimeout(r, 2000));
+      return generateOneWithRetry(sectionId, retriesLeft - 1);
+    }
+  }
+
   async function handleGenerateAllMissing() {
     const targets = sections.filter((s) => s.questionCount === 0);
     if (targets.length === 0) return;
@@ -158,20 +175,16 @@ export function RoadmapEditor({
     setBulkGenerating(true);
     setBulkProgress({ done: 0, total: targets.length });
 
-    const CONCURRENCY = 3;
+    // Keep concurrency low — each call is a slow Claude tool-use generation;
+    // too many in flight at once risks platform/API timeouts and retries pile up.
+    const CONCURRENCY = 2;
     let cursor = 0;
     let done = 0;
     async function worker() {
       while (cursor < targets.length) {
         const section = targets[cursor++]!;
         try {
-          const res = await fetch('/api/admin/questions/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sectionId: section._id }),
-          });
-          const data = (await res.json()) as { count?: number; error?: string };
-          if (!res.ok) throw new Error(data.error ?? 'Generation failed');
+          const data = await generateOneWithRetry(section._id);
           handleSectionGenerated(section._id, data.count ?? 0);
         } catch (e) {
           setError(`"${section.title}": ${messageFrom(e)}`);

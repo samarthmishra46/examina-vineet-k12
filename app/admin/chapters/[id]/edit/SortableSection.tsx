@@ -69,16 +69,27 @@ export function SortableSection({
     });
   }
 
-  async function handleGenerateQuestions() {
-    setGenStatus('generating');
+  async function generateWithRetry(retriesLeft = 2): Promise<{ count?: number; error?: string }> {
     try {
       const res = await fetch('/api/admin/questions/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sectionId: section._id }),
       });
-      const data = (await res.json()) as { count?: number; error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Generation failed');
+      const data = (await res.json().catch(() => ({}))) as { count?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      return data;
+    } catch (e) {
+      if (retriesLeft <= 0) throw e;
+      await new Promise((r) => setTimeout(r, 2000));
+      return generateWithRetry(retriesLeft - 1);
+    }
+  }
+
+  async function handleGenerateQuestions() {
+    setGenStatus('generating');
+    try {
+      const data = await generateWithRetry();
       onGenerated(section._id, data.count ?? 0);
       setGenStatus('done');
     } catch (e) {
