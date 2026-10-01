@@ -10,6 +10,7 @@ export const env = createEnv({
     ANTHROPIC_API_KEY: z.string().min(1),
     BLOB_READ_WRITE_TOKEN: z.string().min(1),
     OPENAI_API_KEY: z.string().min(1),
+    SARVAM_API_KEY: z.string().min(1),
     // Optional: when missing HeyGen avatar silently disables itself
     HEYGEN_API_KEY: z.string().min(1).optional(),
     // Razorpay — test keys start with rzp_test_, live keys with rzp_live_
@@ -33,6 +34,7 @@ export const env = createEnv({
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    SARVAM_API_KEY: process.env.SARVAM_API_KEY,
     HEYGEN_API_KEY: process.env.HEYGEN_API_KEY,
     RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,
     RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,

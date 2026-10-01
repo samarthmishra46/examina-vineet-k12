@@ -1,39 +1,40 @@
 import crypto from 'crypto';
-import OpenAI from 'openai';
+import { SarvamAIClient } from 'sarvamai';
 import { list, put } from '@vercel/blob';
 import { env } from '@/env';
 
-let _client: OpenAI | undefined;
+let _client: SarvamAIClient | undefined;
 
-function getClient(): OpenAI {
+function getClient(): SarvamAIClient {
   if (!_client) {
-    _client = new OpenAI({
-      apiKey: env.OPENAI_API_KEY,
-      // OpenAI TTS can spike to 20-30s from India under load
-      timeout: 60_000,
-      maxRetries: 2,
-    });
+    _client = new SarvamAIClient({ apiSubscriptionKey: env.SARVAM_API_KEY });
   }
   return _client;
 }
 
-export type TtsVoice = 'alloy' | 'echo' | 'fable' | 'nova' | 'onyx' | 'shimmer';
+export type TtsVoice =
+  | 'rahul' | 'aditya' | 'vijay' | 'shubh' | 'dev' | 'amit' | 'rohan'
+  | 'ritu' | 'priya' | 'neha' | 'pooja' | 'simran' | 'kavya';
 
-// nova: warm, energetic, expressive — best for teaching persona
-export const DEFAULT_VOICE: TtsVoice = 'nova';
+// rahul: warm, confident, coaching-teacher cadence — chosen for Aryan Sir after
+// listening comparison against aditya/vijay (2026-10-01).
+export const DEFAULT_VOICE: TtsVoice = 'rahul';
 
 // L1: in-memory per serverless instance (survives warm re-invocations on Fluid Compute)
 const memCache = new Map<string, ArrayBuffer>();
 
 /**
- * Synthesize text to mp3 via OpenAI tts-1-hd.
+ * Synthesize Hinglish text to mp3 via Sarvam AI (bulbul:v3, hi-IN).
+ * Sarvam's hi-IN language code natively handles code-mixed Hindi/English text
+ * ("Is question mein percentage ko fraction mein convert karo") without the
+ * mispronunciation issues English-first TTS providers have with Hinglish.
  *
  * Caching layers:
  *   L1 — in-memory Map: 0 ms, per function instance
  *   L2 — Vercel Blob: ~50–100 ms lookup, cross-instance, 30-day TTL
  *
- * On cache miss: calls OpenAI (~8–15 s), then writes to both caches.
- * Cache hit rate is high for repeated lesson phrases and common narrations.
+ * On cache miss: calls Sarvam, then writes to both caches. Cache hit rate is
+ * high since lessons are generated once per sub-topic and reused across students.
  */
 export async function synthesizeSpeech(
   text: string,
@@ -41,7 +42,7 @@ export async function synthesizeSpeech(
 ): Promise<ArrayBuffer> {
   const cacheKey = crypto
     .createHash('sha1')
-    .update(`${voice}:${text}`)
+    .update(`sarvam:${voice}:${text}`)
     .digest('hex');
 
   // L1: in-memory
@@ -61,17 +62,25 @@ export async function synthesizeSpeech(
       }
     }
   } catch {
-    // Blob unavailable — fall through to OpenAI
+    // Blob unavailable — fall through to Sarvam
   }
 
-  // Generate via OpenAI tts-1-hd (higher quality, more natural prosody)
-  const response = await getClient().audio.speech.create({
-    model: 'tts-1-hd',
-    voice,
-    input: text,
-    response_format: 'mp3',
+  // Generate via Sarvam bulbul:v3
+  const response = await getClient().textToSpeech.convert({
+    text,
+    language_code: 'hi-IN',
+    speaker: voice,
+    model: 'bulbul:v3',
+    output_audio_codec: 'mp3',
   });
-  const buffer = await response.arrayBuffer();
+  const base64Audio = response.audios[0];
+  if (!base64Audio) throw new Error('Sarvam TTS returned no audio');
+  const nodeBuffer = Buffer.from(base64Audio, 'base64');
+  // Buffer.buffer may be a larger pooled ArrayBuffer — slice to the actual bytes.
+  const buffer = nodeBuffer.buffer.slice(
+    nodeBuffer.byteOffset,
+    nodeBuffer.byteOffset + nodeBuffer.byteLength,
+  ) as ArrayBuffer;
 
   // Populate both caches (blob write is fire-and-forget)
   memCache.set(cacheKey, buffer);
