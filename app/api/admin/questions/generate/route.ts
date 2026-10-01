@@ -62,6 +62,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ count: docs.length });
   } catch (err) {
     console.error('[admin/questions/generate] failed:', err);
-    return NextResponse.json({ error: 'Question generation failed. Please try again.' }, { status: 502 });
+    // Admin-only route — safe to surface the real error for debugging.
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Question generation failed: ${detail}` }, { status: 502 });
   }
 }
