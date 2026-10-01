@@ -1,6 +1,7 @@
 'use client';
 
 import '@excalidraw/excalidraw/index.css';
+import './excalidraw-overrides.css';
 
 import dynamic from 'next/dynamic';
 import {

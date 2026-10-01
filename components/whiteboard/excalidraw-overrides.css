@@ -1,0 +1,16 @@
+/*
+ * Excalidraw's own stylesheet never gives .excalidraw__canvas-wrapper an
+ * explicit size — it relies on flex auto-sizing from in-flow content. Its
+ * canvas children are `position: absolute` (zero intrinsic size), while the
+ * sibling `.layer-ui__wrapper` claims the full flex-row width via its own
+ * `width: 100%`, even when zenMode hides it visually. Net effect: the
+ * canvas-wrapper collapses to 0×H and every drawn command becomes invisible
+ * even though it's correctly painted onto the (still correctly sized) canvas
+ * pixel buffer. Force the wrapper to fill its real container instead of
+ * relying on Excalidraw's intrinsic flex sizing.
+ */
+.excalidraw__canvas-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+}
