@@ -1,3 +1,4 @@
+import { OBJECTIVE_VISIBLE } from '@/lib/db/question-filters';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { requireAuth } from '@/lib/auth/helpers';
@@ -14,7 +15,7 @@ export default async function MockExamPage() {
 
   const chapters = await Chapter.find({ status: 'published' }).select('_id').lean();
   const sections = await Section.find({ chapterId: { $in: chapters.map((c) => c._id) } }).select('_id title').lean();
-  const totalQ = await Question.countDocuments({ sectionId: { $in: sections.map((s) => s._id) }, flagSuspended: { $ne: true } });
+  const totalQ = await Question.countDocuments({ sectionId: { $in: sections.map((s) => s._id) }, flagSuspended: { $ne: true }, ...OBJECTIVE_VISIBLE });
 
   if (totalQ < 5) {
     return (

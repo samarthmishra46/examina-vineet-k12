@@ -25,6 +25,12 @@ export async function AdminShell({ children }: { children: React.ReactNode }) {
               Chapters
             </Link>
             <Link
+              href="/admin/papers"
+              className="text-sm text-inkMuted transition-colors duration-std ease-std hover:text-ink"
+            >
+              Papers
+            </Link>
+            <Link
               href="/admin/guide"
               className="text-sm text-inkMuted transition-colors duration-std ease-std hover:text-ink"
             >

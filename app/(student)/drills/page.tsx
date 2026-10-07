@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { requireAuth } from '@/lib/auth/helpers';
+import { OBJECTIVE_VISIBLE } from '@/lib/db/question-filters';
 import { Chapter, Question, Section, connectMongoose } from '@/lib/db/models';
 
 export const metadata: Metadata = { title: 'Speed Drills · Examina' };
@@ -16,7 +17,7 @@ export default async function DrillsListPage() {
   const sectionIds = sections.map((s) => s._id);
 
   const counts = await Question.aggregate([
-    { $match: { sectionId: { $in: sectionIds }, flagSuspended: { $ne: true } } },
+    { $match: { sectionId: { $in: sectionIds }, flagSuspended: { $ne: true }, ...OBJECTIVE_VISIBLE } },
     { $group: { _id: '$sectionId', count: { $sum: 1 } } },
   ]);
   const countMap = new Map(counts.map((r: { _id: unknown; count: number }) => [r._id!.toString(), r.count as number]));

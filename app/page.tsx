@@ -139,8 +139,25 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t border-line">
-        <div className="mx-auto max-w-6xl px-6 py-8 text-sm text-inkMuted">
-          © 2026 Examina · Class 6–12 AI Tutor
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-8 text-sm text-inkMuted">
+          <span>© 2026 Examina · Class 6–12 AI Tutor</span>
+          <nav aria-label="Footer" className="flex flex-wrap gap-5">
+            <Link href="/syllabus/cbse-class-10-maths" className="hover:text-ink">
+              Class 10 syllabus
+            </Link>
+            <Link href="/syllabus/cbse-class-12-physics" className="hover:text-ink">
+              Class 12 syllabus
+            </Link>
+            <Link href="/blog" className="hover:text-ink">
+              Revision blog
+            </Link>
+            <Link href="/faq" className="hover:text-ink">
+              FAQ
+            </Link>
+            <Link href="/about" className="hover:text-ink">
+              About
+            </Link>
+          </nav>
         </div>
       </footer>
     </div>

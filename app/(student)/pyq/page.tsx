@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { requireAuth } from '@/lib/auth/helpers';
+import { OBJECTIVE_VISIBLE, PAPER_SOURCES } from '@/lib/db/question-filters';
 import { Chapter, Question, Section, connectMongoose } from '@/lib/db/models';
 
 export const metadata: Metadata = { title: 'Past Year Questions · Examina' };
@@ -17,7 +18,15 @@ export default async function PYQPage() {
   const sectionIds = sections.map((s) => s._id);
 
   const hardCounts = await Question.aggregate([
-    { $match: { sectionId: { $in: sectionIds }, difficulty: 3, flagSuspended: { $ne: true } } },
+    {
+      $match: {
+        sectionId: { $in: sectionIds },
+        flagSuspended: { $ne: true },
+        ...OBJECTIVE_VISIBLE,
+        // Hard generated questions plus real past-paper questions.
+        $or: [{ difficulty: 3 }, { source: { $in: PAPER_SOURCES } }],
+      },
+    },
     { $group: { _id: '$sectionId', count: { $sum: 1 } } },
   ]);
 

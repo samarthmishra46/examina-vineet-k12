@@ -86,6 +86,28 @@ export function SortableSection({
     }
   }
 
+  // Board-style written questions (short/long with marking schemes). Kept separate from the
+  // MCQ count shown on the main button.
+  const [writtenStatus, setWrittenStatus] = useState<'idle' | 'generating' | 'done' | 'error'>(
+    'idle',
+  );
+  async function handleGenerateWritten() {
+    setWrittenStatus('generating');
+    try {
+      const res = await fetch('/api/admin/questions/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sectionId: section._id, mode: 'written' }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { count?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setWrittenStatus('done');
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Failed to generate written questions.');
+      setWrittenStatus('error');
+    }
+  }
+
   async function handleGenerateQuestions() {
     setGenStatus('generating');
     try {
@@ -234,6 +256,19 @@ export function SortableSection({
               : section.questionCount > 0
                 ? `✓ ${section.questionCount} question${section.questionCount === 1 ? '' : 's'} · regenerate`
                 : 'Gen questions'}
+          </button>
+          <button
+            type="button"
+            onClick={handleGenerateWritten}
+            disabled={writtenStatus === 'generating' || genStatus === 'generating' || pending}
+            className="text-xs text-inkMuted transition-colors duration-std ease-std hover:text-accent disabled:opacity-50 whitespace-nowrap"
+            title="Generate board-style written questions with marking schemes"
+          >
+            {writtenStatus === 'generating'
+              ? 'Generating…'
+              : writtenStatus === 'done'
+                ? '✓ written · regenerate'
+                : 'Gen written'}
           </button>
           <button
             type="button"

@@ -1,7 +1,7 @@
 import { isValidObjectId } from 'mongoose';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/helpers';
-import { Question, connectMongoose } from '@/lib/db/models';
+import { Question, WRITTEN_TYPES, connectMongoose } from '@/lib/db/models';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,14 +18,25 @@ export async function GET(req: Request) {
 
   await connectMongoose();
 
-  const questions = await Question.find({ sectionId, flagSuspended: { $ne: true } })
+  // kind=objective (default): MCQ-shaped questions for the adaptive player.
+  // kind=written: short/long board questions, graded by /api/practice/grade.
+  const kind = searchParams.get('kind') === 'written' ? 'written' : 'objective';
+  const typeFilter =
+    kind === 'written' ? { type: { $in: WRITTEN_TYPES } } : { type: { $nin: WRITTEN_TYPES } };
+
+  const questions = await Question.find({ sectionId, flagSuspended: { $ne: true },
+    reviewStatus: { $ne: 'pending' },
+    ...typeFilter })
     .sort({ difficulty: 1, createdAt: 1 })
     .lean();
 
-  // Strip correctIndex — never send to client. It's validated server-side on submit.
+  // Never send correctIndex, solution or markingScheme to the client.
   const safe = questions.map((q) => ({
     _id: q._id.toString(),
-    text: q.text,
+    // Case-based questions share a passage; prepend it so the existing player shows it.
+    text: q.context ? `${q.context}\n\n${q.text}` : q.text,
+    type: q.type,
+    marks: q.marks ?? 1,
     options: q.options,
     difficulty: q.difficulty,
     timeExpectedSeconds: q.timeExpectedSeconds,

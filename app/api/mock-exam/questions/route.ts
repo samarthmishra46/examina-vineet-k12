@@ -1,3 +1,4 @@
+import { OBJECTIVE_VISIBLE } from '@/lib/db/question-filters';
 import { NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/helpers';
 import { Question, Section, Chapter, connectMongoose } from '@/lib/db/models';
@@ -24,6 +25,7 @@ export async function GET() {
   const allQuestions = await Question.find({
     sectionId: { $in: sectionIds },
     flagSuspended: { $ne: true },
+    ...OBJECTIVE_VISIBLE,
   })
     .select('_id text options difficulty timeExpectedSeconds sectionId conceptTags')
     .lean();
@@ -53,7 +55,7 @@ export async function GET() {
     options: q.options,
     difficulty: q.difficulty,
     timeExpectedSeconds: q.timeExpectedSeconds,
-    sectionTitle: sectionTitleMap.get(q.sectionId.toString()) ?? 'Unknown',
+    sectionTitle: sectionTitleMap.get(q.sectionId?.toString() ?? '') ?? 'Unknown',
   }));
 
   return NextResponse.json({ questions: safe });
