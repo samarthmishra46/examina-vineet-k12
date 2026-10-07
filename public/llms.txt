@@ -1,0 +1,29 @@
+# Examina
+
+> Examina is an AI tutor for CBSE Class 10 and Class 12 board exam preparation, based on the NCERT textbooks. It teaches chapters on a live whiteboard with a spoken walkthrough, lets students ask doubts mid-lesson, gives adaptive MCQ practice, diagnoses wrong answers, and marks written answers against step-wise board marking schemes.
+
+Examina is an independent study tool and is not affiliated with CBSE or NCERT. Students should confirm the current syllabus and exam pattern on the official CBSE website.
+
+## Coverage
+- Class 10: Maths, Science
+- Class 12: Maths, Physics, Chemistry, Biology
+
+## Key pages
+- [Home](/): what Examina does and how it works
+- [FAQ](/faq): common questions about the tutor, marking, practice and coverage
+- [About](/about): why Examina exists
+- [Revision blog](/blog): guides on how to revise for CBSE board exams
+- [Class 10 Maths chapters](/syllabus/cbse-class-10-maths)
+- [Class 10 Science chapters](/syllabus/cbse-class-10-science)
+- [Class 12 Maths chapters](/syllabus/cbse-class-12-maths)
+- [Class 12 Physics chapters](/syllabus/cbse-class-12-physics)
+- [Class 12 Chemistry chapters](/syllabus/cbse-class-12-chemistry)
+- [Class 12 Biology chapters](/syllabus/cbse-class-12-biology)
+
+## Articles
+- [How to revise CBSE Class 10 Maths](/blog/how-to-revise-cbse-class-10-maths)
+- [How to revise CBSE Class 10 Science](/blog/how-to-revise-cbse-class-10-science)
+- [CBSE Class 12 Physics revision strategy](/blog/cbse-class-12-physics-revision-strategy)
+- [How to use previous-year papers for CBSE boards](/blog/how-to-use-previous-year-papers-cbse-boards)
+- [A 30-day revision plan before CBSE boards](/blog/last-30-days-revision-plan-cbse-boards)
+- [Active recall and spaced repetition for board exams](/blog/active-recall-and-spaced-repetition-for-board-exams)

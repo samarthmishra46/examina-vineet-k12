@@ -149,6 +149,7 @@ export function PracticePlayer({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        kind: 'answer',
         questionId: currentQuestion._id,
         selectedIndex: optionIndex,
         timeTakenSeconds: timeTaken,
@@ -186,6 +187,7 @@ export function PracticePlayer({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ questionId, selectedIndex: optionIndex }),
       });
+      if (!res.ok) throw new Error('Diagnosis unavailable');
       const data = (await res.json()) as DiagnosisResult;
       setDiagnosis(data);
       setState('wrong');
@@ -209,9 +211,8 @@ export function PracticePlayer({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          kind: 'recovery',
           questionId: currentQuestion._id,
-          selectedIndex: submitResult?.correctIndex ?? 0,
-          timeTakenSeconds: 0,
           recoveredCorrectly: correct,
           errorType: diagnosis.errorType,
         }),

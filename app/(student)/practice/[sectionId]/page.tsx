@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { isValidObjectId } from 'mongoose';
 import { notFound } from 'next/navigation';
-import { PracticePlayer } from '@/components/practice/PracticePlayer';
+import { PracticeTabs } from '@/components/practice/PracticeTabs';
 import { requireAuth } from '@/lib/auth/helpers';
 import { Chapter, Section, connectMongoose } from '@/lib/db/models';
 
@@ -29,7 +29,7 @@ export default async function PracticePage({ params }: { params: { sectionId: st
   if (!chapter || chapter.status !== 'published') notFound();
 
   return (
-    <PracticePlayer
+    <PracticeTabs
       sectionId={params.sectionId}
       sectionTitle={section.title}
       chapterId={section.chapterId.toString()}
